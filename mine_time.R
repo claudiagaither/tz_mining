@@ -482,16 +482,16 @@ nw_rdt <- nw_rdt %>% mutate(across(c(rain, dhs_temp), ~ na_if(., -9999)))
 #nw_rdt <- nw_rdt[complete.cases(nw_rdt[c("dhs_temp", "rain", "veg")]), ]
 # subset clusters for doubly exposed
 #both_rdt <- nw_rdt %>% filter(close_big==1 & close_mine==1)
-summary(nw_rdt$nearest_dist)
+#summary(nw_rdt$nearest_dist)
 
-## part three : Markov Chain Monte Carlo for estimation------
 
-# cluster_coords: data frame with cluster_id, lat, long
-coords_mat <- as.matrix(nw_rdt[, c("long", "lat")])
-Dmat <- distm(coords_mat) / 1000  # distance in km
 
-#log-posterior function
-log_posterior <- function(params, y, x, cluster_ids, Dmat) {
+## part three : functions and starting values for sampling model parameters------
+
+#log-posterior function, this will compute posterior distribution(s?)
+#from which we will sample parameter values
+
+log_model1 <- function(params, y, x, cluster_ids, Dmat) {
   n_clusters <- nrow(Dmat)
   beta0 <- params[1]
   beta1 <- params[2]
@@ -506,26 +506,23 @@ log_posterior <- function(params, y, x, cluster_ids, Dmat) {
   # Check if inversion failed
   if (any(is.na(Sigma_inv)) || is.na(det_Sigma)) {
     cat("Matrix inversion or determinant failed\n")
-    return(NA)
-  }
+    return(NA)}
   
   # Linear predictor
   eta <- beta0 + beta1 * x + s[cluster_ids]
   if (any(is.na(eta))) {
     cat("NA in eta\n")
-    return(NA)
-  }
+    return(NA)}
   
   loglik <- sum(y * eta - log1p(exp(eta)))  # log-likelihood
   if (is.na(loglik)) {
     cat("NA in log-likelihood\n")
-    return(NA)
-  }
+    return(NA)}
   
   quad_form <- t(s) %*% Sigma_inv %*% s
   log_prior_s <- -0.5 * (quad_form + det_Sigma)
   
-  log_prior_beta <- dnorm(beta0, 0, 10, log = TRUE) + dnorm(beta1, 0, 10, log = TRUE)
+  log_prior_beta <- dnorm(beta0, 0, 5, log = TRUE) + dnorm(beta1, 0, 5, log = TRUE)
   log_prior_rho <- dnorm(params[3], 0, 1, log = TRUE)
   
   total <- loglik + log_prior_s + log_prior_beta + log_prior_rho
@@ -534,176 +531,175 @@ log_posterior <- function(params, y, x, cluster_ids, Dmat) {
 }
 
 
-#Metropolis-Hastings loop
-run_mcmc <- function(start, n_iter, log_post_fun, proposal_sd, data_args) {
+## Metropolis-Hastings loop to sample from posterior distribution we just assigned
+run_mcmc <- function(start, n_iter, burn_in = 1000, thin = 1,
+                     log_post_fun, proposal_sd, data_args) {
+  
   n_params <- length(start)
-  chain <- matrix(NA, nrow = n_iter, ncol = n_params)
-  chain[1, ] <- start
+  chain_full <- matrix(NA, nrow = n_iter, ncol = 3)  # beta0, beta1, rho
+  colnames(chain_full) <- c("beta0", "beta1", "rho")
+  
+  current_params <- start
   accept_count <- 0
   
-  cat("Initial log-posterior:", do.call(log_post_fun, c(list(start), data_args)), "\n")
+  cat("Initial log-posterior:", 
+      do.call(log_post_fun, c(list(current_params), data_args)), "\n")
   
-  for (i in 2:n_iter) {
-    # Step 1: propose a new parameter set
-    proposal <- rnorm(n_params, mean = chain[i - 1, ], sd = proposal_sd)
+  for (i in 1:n_iter) {
+    # Step 1: propose new parameters
+    proposal <- rnorm(n_params, mean = current_params, sd = proposal_sd)
     
-    # Step 2: compute log-posterior for current and proposed values
-    log_post_current <- do.call(log_post_fun, c(list(params = chain[i - 1, ]), data_args))
+    # Step 2: evaluate log-posteriors
+    log_post_current <- do.call(log_post_fun, c(list(params = current_params), data_args))
     log_post_proposal <- do.call(log_post_fun, c(list(params = proposal), data_args))
-    
-    if (i %% 100 == 0) {
-      cat("Iter", i, ": log_post =", log_post_current, "->", log_post_proposal, "\n")
-    }
     
     # Step 3: compute acceptance probability
     log_accept_ratio <- log_post_proposal - log_post_current
     accept_prob <- exp(log_accept_ratio)
+    if (is.na(accept_prob) || is.nan(accept_prob)) accept_prob <- 0
     
-    # Handle NaNs or overly large values safely
-    if (is.na(accept_prob) || is.nan(accept_prob)) {
-      accept_prob <- 0
-    }
-    
-    # Step 4: accept or reject
+    # Step 4: accept/reject
     if (runif(1) < accept_prob) {
-      chain[i, ] <- proposal
-      accept_count <- accept_count + 1
-    } else {
-      chain[i, ] <- chain[i - 1, ]  # stay at current state
-    }
-  }
+      current_params <- proposal
+      accept_count <- accept_count + 1}
+    
+    # Save only key parameters
+    chain_full[i, ] <- c(current_params[1],      # beta0
+                         current_params[2],      # beta1
+                         exp(current_params[3]))} # rho (on original scale)
   
   cat("Acceptance rate:", accept_count / n_iter, "\n")
-  return(chain)
+  
+  # Apply burn-in and thinning
+  kept_iters <- seq(burn_in + 1, n_iter, by = thin)
+  chain_final <- chain_full[kept_iters, , drop = FALSE]
+  
+  return(chain_final)}
+
+
+#plots to review traces and posterior density from MCMC sampling
+plot_mcmc_diagnostics <- function(chain) {
+  par(mfrow = c(3, 2), mar = c(4, 4, 2, 1))
+  
+  param_names <- colnames(chain)
+  
+  for (j in seq_along(param_names)) {
+    param <- chain[, j]
+    
+    # Trace plot
+    plot(param, type = "l", col = "steelblue",
+         main = paste("Trace:", param_names[j]),
+         xlab = "Iteration", ylab = param_names[j])
+    
+    # Posterior density
+    dens <- density(param)
+    plot(dens, main = paste("Density:", param_names[j]),
+         xlab = param_names[j], ylab = "Density", col = "darkorange", lwd = 2)
+    abline(v = mean(param), col = "red", lty = 2) # posterior mean
+  }
+  
+  par(mfrow = c(1, 1))}
+
+
+#compute starting values for model 1 chain
+# x: mine proximity (vector), y: 0/1 RDT outcome, cluster_id: factor or integer per row
+# Keep only complete cases for y, x, and cluster_id
+# ---- 1) Clean, keep only rows needed for the model
+model_df <- nw_rdt[, c("nearest_dist", "HML35", "HV001", "long", "lat", "year.x")]
+
+
+# Ensure y is 0/1 numeric (not factor/labels)
+y <- as.integer(model_df$HML35)
+# If HML35 isn’t already 0/1, map here, e.g.:
+# y <- ifelse(model_df$HML35 %in% c(1, "positive", "Yes"), 1, 0)
+
+# Predictor
+x <- model_df$nearest_dist
+x_std <- as.numeric(scale(x))
+
+# ---- 2) Make a cluster-level table with unique coords
+cluster_tbl <- model_df %>%
+  distinct(year.x, HV001, long, lat) %>%   # include survey year
+  arrange(year.x, HV001) %>%
+  mutate(cluster_id = row_number())
+
+cluster_tbl_unique <- cluster_tbl %>%
+  distinct(HV001, year.x, cluster_id, .keep_all = FALSE)
+
+
+K <- nrow(cluster_tbl)
+
+# ----- 3) Build Dmat at the CLUSTER level (K x K)
+coords_mat <- as.matrix(cluster_tbl[, c("long", "lat")])
+Dmat <- distm(coords_mat) / 1000  # km
+
+# ---- 4) Map each row to its cluster index 1..K
+model_df <- model_df %>%
+  left_join(
+    dplyr::select(cluster_tbl_unique, HV001, year.x, cluster_id),
+    by = c("HV001", "year.x"))
+
+cluster_ids <- model_df$cluster_id  # integers in 1..K
+
+# Safety checks
+stopifnot(length(x_std) == length(y),
+          length(cluster_ids) == length(y),
+          all(cluster_ids >= 1 & cluster_ids <= K),
+          nrow(Dmat) == K, ncol(Dmat) == K)
+
+
+length(unique(model_df$HV001))
+length(unique(nw_rdt$HV001))
+
+
+# ---- 5) Starting values
+eps <- 1e-6
+p_bar <- mean(y)
+p_bar <- min(max(p_bar, eps), 1 - eps)
+beta0_start <- qlogis(p_bar)
+
+beta1_start <- 0
+suppressWarnings({
+  fit0 <- try(glm(y ~ x_std, family = binomial()), silent = TRUE)
+})
+if (!inherits(fit0, "try-error")) {
+  b <- suppressWarnings(coef(fit0))
+  if (!any(is.na(b))) beta1_start <- unname(b[2])
 }
 
+dvals <- Dmat[upper.tri(Dmat)]
+dvals <- dvals[dvals > 0]
+rho_start <- if (length(dvals)) quantile(dvals, 0.75, na.rm = TRUE) else 10
+log_rho_start <- log(rho_start)
 
-## simulated data to test MCMC and log posterior functions----
-set.seed(123)
+s_start <- rep(0, K)
 
-# Cluster info
-n_clusters <- 20
-coords <- data.frame(
-  cluster_id = 1:n_clusters,
-  lat = runif(n_clusters, -6, -4),     # simulate latitudes & longitudes
-  long = runif(n_clusters, 35, 37))
+start_vals1 <- c(beta0_start, beta1_start, log_rho_start, s_start)
+proposal_sd1 <- c(0.15, 0.15, 0.08, rep(0.10, K))
 
-# Distance matrix in km
-dist_mat <- distm(coords[, c("long", "lat")]) / 1000
+data_args <- list(
+  y = y,
+  x = x_std,
+  cluster_ids = cluster_ids,
+  Dmat = Dmat)
 
-# Spatial covariance matrix with exponential decay
-rho_true <- 50  # spatial range in km
-log_rho_true <- log(rho_true)
-Sigma <- exp(-dist_mat / rho_true)
-
-# Simulate spatial random effects
-spatial_effects <- mvrnorm(n = 1, mu = rep(0, n_clusters), Sigma = Sigma)
-
-# Simulate a mine proximity variable (e.g. mean distance in km)
-mine_proximity <- scale(rnorm(n_clusters, mean = 25, sd = 10))  # scaled
-coords$mine_prox <- mine_proximity
-coords$spatial_effect <- spatial_effects
-
-# Parameters
-beta0_true <- -1
-beta1_true <- -1.5
-n_per_cluster <- 50
-
-indiv_data <- do.call(rbind, lapply(1:n_clusters, function(clust) {
-  cluster_row <- coords[clust, ]
-  n <- n_per_cluster
-  eta <- beta0_true +
-    beta1_true * cluster_row$mine_prox +
-    cluster_row$spatial_effect
-  p <- plogis(eta)  # inverse logit
-  data.frame(
-    y = rbinom(n, size = 1, prob = p),
-    cluster_id = clust,
-    mean_dist = cluster_row$mine_prox
-  )
-}))
-
-# Final inputs
-indiv_data <- indiv_data
-cluster_coords <- coords[, c("cluster_id", "lat", "long")]
-
-# Prep inputs
-y <- indiv_data$y
-x <- indiv_data$mean_dist
-cluster_ids <- indiv_data$cluster_id
-Dmat <- dist_mat
-
-# Starting values: beta0, beta1, log(rho), spatial effects
-start <- c(-1, -1.5, log(50), rnorm(n_clusters, 0, 0.1))
-proposal_sd <- c(0.05, 0.05, 0.05, rep(0.05, n_clusters))
-
-# Run the chain
-set.seed(20)
-chain <- run_mcmc(
-  start = start,
-  n_iter = 3000,
-  log_post_fun = log_posterior,
-  proposal_sd = proposal_sd,
-  data_args = list(y = y, x = x, cluster_ids = cluster_ids, Dmat = Dmat))
-
-#plot traces ?
-#chain_df <- as.data.frame(chain)
-#names(chain_df)[1:3] <- c("beta0", "beta1", "log_rho")
-#par(mfrow = c(3, 1))
-#plot(chain_df$beta0, type = "l", main = "Trace plot: beta0")
-#plot(chain_df$beta1, type = "l", main = "Trace plot: beta1")
-#plot(exp(chain_df$log_rho), type = "l", main = "Trace plot: rho (exp of log_rho)")
-
-# Optional: discard burn-in
-#burn_in <- 1000
-#post_burn <- chain[(burn_in+1):nrow(chain), ]
-
-# Extract parameter samples
-beta0_samples <- chain[, 1]
-beta1_samples <- chain[, 2]
-log_rho_samples <- chain[, 3]
-rho_samples <- exp(log_rho_samples)  # transform back to original scale
-
-# Function to get 95% credible interval
-get_credible_interval <- function(samples) {
-  quantile(samples, probs = c(0.025, 0.975))
+# Optional: quick preflight to fail fast if sizes don’t match
+preflight <- function(params, data_args) {
+  K <- nrow(data_args$Dmat)
+  stopifnot(length(params) == 3 + K)
+  stopifnot(all(is.finite(unlist(data_args))))
+  TRUE
 }
+preflight(start_vals1, data_args)
 
-# Compute credible intervals
-beta0_ci <- get_credible_interval(beta0_samples)
-beta1_ci <- get_credible_interval(beta1_samples)
-rho_ci <- get_credible_interval(rho_samples)
 
-# Compute posterior means
-beta0_mean <- mean(beta0_samples)
-beta1_mean <- mean(beta1_samples)
-rho_mean <- mean(rho_samples)
+## run chain using Dmat, RDT outcomes (y), mine proximity (x), cluster ids.. 
+pilot_chain <- run_mcmc(
+  start = start_vals1,
+  n_iter = 4000, burn_in = 1000, thin = 5,
+  log_post_fun = log_model1,
+  proposal_sd = proposal_sd1,
+  data_args = data_args)
 
-# Print summary
-#cat("Beta0 estimate:", round(beta0_mean, 3), 
-#    "95% CI:", round(beta0_ci[1], 3), "-", round(beta0_ci[2], 3), "\n")
-#cat("Beta1 estimate:", round(beta1_mean, 3), 
-#    "95% CI:", round(beta1_ci[1], 3), "-", round(beta1_ci[2], 3), "\n")
-#cat("Rho estimate:", round(rho_mean, 3), 
-#    "95% CI:", round(rho_ci[1], 3), "-", round(rho_ci[2], 3), "\n")
-
-# Create a data frame with samples and parameter names for plotting
-posterior_df <- data.frame(beta0 = beta0_samples, beta1 = beta1_samples, rho = rho_samples)
-
-# Convert to long format for ggplot
-posterior_long <- pivot_longer(posterior_df, cols = everything(), 
-                  names_to = "parameter", values_to = "value")
-
-# True parameter values
-true_values <- data.frame(parameter = c("beta0", "beta1", "rho"),
-               true_value = c(beta0_true, beta1_true, rho_true))
-
-# Plot posterior densities and true values
-ggplot(posterior_long, aes(x = value)) +
-  geom_density(fill = "skyblue", alpha = 0.6) +
-  facet_wrap(~ parameter, scales = "free") +
-  geom_vline(data = true_values, aes(xintercept = true_value), 
-             color = "red", linetype = "dashed", linewidth = 1) +
-  labs(title = "Posterior densities with true parameter values",
-       x = "Parameter value", y = "Density") + theme_classic()
+plot_mcmc_diagnostics(pilot_chain)
 
