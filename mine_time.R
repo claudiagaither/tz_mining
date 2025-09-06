@@ -1,4 +1,4 @@
-## Malaria in national surveys from 2011-2022, predicted by proximity to artisanal and industrial mines----
+## Malaria in TZ national surveys from 2011-2022, predicted by proximity to artisanal and industrial mines----
 
 #part one: data extract and organization----
 
@@ -7,22 +7,28 @@ library(broom)
 library(broom.mixed)
 library(dplyr)
 library(geosphere)
+library(ggnewscale)
 library(ggplot2)
 library(ggpubr)
 library(haven)
+library(INLA)
 library(jsonlite)
 library(lwgeom)
 library(MASS)
+library(Matrix)
 library(pscl)
 library(purrr)
+library(readr)
 library(readxl)
 library(sf)
 library(statmod)
+library(stars)
 library(stats)
 library(terra)
 library(tidyverse)
 library(viridis)
 library(writexl)
+
 
 #DHS 2022 household member recode
 TZ22_pr <- read_sas("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_DHS22/TZPR82SD/TZPR82FL.SAS7BDAT")
@@ -52,8 +58,35 @@ mines <- fromJSON("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/tza_mines_cura
 mines <- as.data.frame(mines)
 #bigger mines in north west TZ manually compiled from mention in the IPIS report 
 big_mines <- read_excel("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/big_mines.xlsx")
-roads <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/hotosm_tza_roads_lines_shp/hotosm_tza_roads_lines_shp.shp")
 
+#and roads
+#roads <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/hotosm_tza_roads_lines_shp/hotosm_tza_roads_lines_shp.shp")
+#subset road data 
+#roi <- st_bbox(c(xmin = 29.4, xmax = 35, ymin = -5.5, ymax = -0.5), crs = st_crs(roads)) |> st_as_sfc()
+#roads_crop <- st_crop(roads, roi)
+#roads_path <- roads_crop %>% filter(highway=="path")
+#roads_res <- roads_crop %>% filter(highway=="residential")
+#roads_foot <- roads_crop %>% filter(highway=="footway")
+#roads_123 <- roads_crop %>% filter(highway %in% c("primary", "secondary", "tertiary"))
+# Export as shapefile (creates multiple files: .shp, .shx, .dbf, etc.)
+#st_write(roads_path, "C:/Users/cgait/OneDrive/Desktop/TZ mining/data/roads_shp/roads_path.shp")
+
+#read back in subsetted roads
+roads_123 <- st_read("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/roads_shp/roads_123.shp")
+#bordering countries in Africa
+africa <- st_read("C:/Users/cgait/OneDrive/Desktop/IDEEL/Rwanda nonpf/data/data downloads/Africa_Boundaries-shp/Africa_Boundaries.shp")
+#regional boundaries
+district <- st_read("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/districts/Districts.shp")
+#rivers 
+#water <- st_read("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/Water_Supply_Control-Rivers-shp/Water_Supply_Control-Rivers.shp")
+#Lake Victoria
+Victoria <- st_read("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/Lake_Victoria_Shapefile/Lake_Victoria_Shapefile.shp")
+
+#subset bounds (Uganda, Rwanda, Burundi)
+uga<-subset(africa, NAME_0=="Uganda")
+rwa<-subset(africa, NAME_0=="Rwanda")
+bur<-subset(africa, NAME_0=="Burundi")
+bounds<-rbind(bur, rwa, uga)
 
 # site names for artisinal mine sites
 mines$name <- mines$features.properties$sitename
@@ -434,9 +467,11 @@ tz_dhs <- rbind(tz_dhs22, tz_mis17, tz_dhs16, tz_dhs15, tz_ais12, tz_ais11)
 
 #subset participants with non-missing RDT data
 tz_rdt <- tz_dhs %>% filter(!is.na(HML35))
+#remove extra year column that comes from previous joins
+tz_rdt$year <- tz_rdt$year.x
 
 #clean workspace againnn
-remove(tz_geo_prox,survey_coords,big_mines,mines,survey_years,proximity_data, mine_times,
+remove(tz_geo_prox,survey_coords,big_mines,mines,survey_years,proximity_data,
        tz_ais11, tz_ais12, tz_dhs15, tz_dhs16, tz_mis17, tz_dhs22, tz_dhs,
        ccoord11, ccoord12, ccoord15, ccoord16, ccoord17, ccoord22)
 
@@ -462,7 +497,6 @@ nw_rdt <- nw_rdt %>% mutate(edu_catb = case_when(HV106==0 ~ "Primary or no educa
 
 #binary variable for water source (water_cat, 1 = piped, 0 = unpiped)
 nw_rdt$water_cat <- cut(nw_rdt$HV201, breaks=c(0, 12, Inf), labels=c(0,1), include.lowest = TRUE) 
-nw_rdt$wealthq<-as.factor(nw_rdt$HV270)
 #nw_rdt <- nw_rdt %>% mutate(wealthb = case_when(HV270==1 ~ "Wealth quintiles 1 & 2",
 #                     HV270==2 ~ "Wealth quintiles 1 & 2", HV270==3 ~ "Wealth quintiles 3-5",
 #                     HV270==4 ~ "Wealth quintiles 3-5", HV270==5 ~ "Wealth quintiles 3-5"))
@@ -471,235 +505,260 @@ nw_rdt$wealthq<-as.factor(nw_rdt$HV270)
 nw_rdt$cluster <- nw_rdt$HV001
 nw_rdt <- nw_rdt %>% mutate(urban = case_when(URBAN_RURA=="U" ~ 1, URBAN_RURA=="R" ~ 0))
 nw_rdt$urban <- as.factor(nw_rdt$urban)
-#recode elevation..
-nw_rdt$elevation <- nw_rdt$ALT_GPS
+
 #binary elevation where 1 = elevated above mosquito habitat
+nw_rdt$elevation <- nw_rdt$ALT_GPS
 nw_rdt <- nw_rdt %>% mutate(elevationb = case_when(HV040 > 1500 ~ 1, HV040 <= 1500 ~ 0))
+
 #replace -9999 in rain and temp with missing
 nw_rdt <- nw_rdt %>% mutate(across(c(rain, dhs_temp), ~ na_if(., -9999)))
+#are these missing or is it really 9999 ???
+#nw_rdt <- nw_rdt %>% mutate(across(c(elevation), ~ na_if(., 9999)))
 
-#exclude missing values if we end up using these
-#nw_rdt <- nw_rdt[complete.cases(nw_rdt[c("dhs_temp", "rain", "veg")]), ]
-# subset clusters for doubly exposed
-#both_rdt <- nw_rdt %>% filter(close_big==1 & close_mine==1)
-#summary(nw_rdt$nearest_dist)
+#rename more variables for upcoming models
+nw_rdt$age <- nw_rdt$HV105
+nw_rdt <- nw_rdt %>% mutate(female = case_when(HV104==2 ~ 1, TRUE ~ 0))
 
+#center all continuous variables around means
+#recode nearest_dist to represent proximity (larger values = closer distance)
+nw_rdt$nearest_dist <- 60-nw_rdt$nearest_dist 
+mean_dist <- mean(nw_rdt$nearest_dist)
+nw_rdt$nearest_distc <- nw_rdt$nearest_dist - mean_dist
 
+#age centered (agec) (range is 0-5 for rdt test results)
+mean_age <- mean(nw_rdt$age)
+nw_rdt$agec <- nw_rdt$age - mean_age
 
-## part three : functions and starting values for sampling model parameters------
+#wealth quintile centered (wealthc)
+mean_wealth <- mean(nw_rdt$HV270)
+nw_rdt$wealthc <- nw_rdt$HV270 - mean_wealth
 
-#log-posterior function, this will compute posterior distribution(s?)
-#from which we will sample parameter values
-
-log_model1 <- function(params, y, x, cluster_ids, Dmat) {
-  n_clusters <- nrow(Dmat)
-  beta0 <- params[1]
-  beta1 <- params[2]
-  rho <- exp(params[3])  # enforce positive
-  s <- params[4:(3 + n_clusters)]  # spatial effects
-  
-  # Covariance matrix
-  Sigma <- exp(-Dmat / rho) + diag(1e-6, n_clusters)
-  Sigma_inv <- tryCatch(solve(Sigma), error = function(e) return(matrix(NA, nrow = n_clusters, ncol = n_clusters)))
-  det_Sigma <- tryCatch(determinant(Sigma, logarithm = TRUE)$modulus, error = function(e) return(NA))
-  
-  # Check if inversion failed
-  if (any(is.na(Sigma_inv)) || is.na(det_Sigma)) {
-    cat("Matrix inversion or determinant failed\n")
-    return(NA)}
-  
-  # Linear predictor
-  eta <- beta0 + beta1 * x + s[cluster_ids]
-  if (any(is.na(eta))) {
-    cat("NA in eta\n")
-    return(NA)}
-  
-  loglik <- sum(y * eta - log1p(exp(eta)))  # log-likelihood
-  if (is.na(loglik)) {
-    cat("NA in log-likelihood\n")
-    return(NA)}
-  
-  quad_form <- t(s) %*% Sigma_inv %*% s
-  log_prior_s <- -0.5 * (quad_form + det_Sigma)
-  
-  log_prior_beta <- dnorm(beta0, 0, 5, log = TRUE) + dnorm(beta1, 0, 5, log = TRUE)
-  log_prior_rho <- dnorm(params[3], 0, 1, log = TRUE)
-  
-  total <- loglik + log_prior_s + log_prior_beta + log_prior_rho
-  if (is.na(total)) cat("NA in total log-posterior\n")
-  return(total)
-}
+#indicator variables for svy wave
+nw_rdt <- nw_rdt %>% mutate(dhs_2022 = case_when(svy=="dhs_2022" ~ 1, TRUE ~ 0))
+nw_rdt <- nw_rdt %>% mutate(mis_2017 = case_when(svy=="mis_2017" ~ 1, TRUE ~ 0))
+nw_rdt <- nw_rdt %>% mutate(dhs_2015 = case_when(svy=="dhs_2015" ~ 1, TRUE ~ 0))
+nw_rdt <- nw_rdt %>% mutate(ais_2011 = case_when(svy=="ais_2011" ~ 1, TRUE ~ 0))
 
 
-## Metropolis-Hastings loop to sample from posterior distribution we just assigned
-run_mcmc <- function(start, n_iter, burn_in = 1000, thin = 1,
-                     log_post_fun, proposal_sd, data_args) {
-  
-  n_params <- length(start)
-  chain_full <- matrix(NA, nrow = n_iter, ncol = 3)  # beta0, beta1, rho
-  colnames(chain_full) <- c("beta0", "beta1", "rho")
-  
-  current_params <- start
-  accept_count <- 0
-  
-  cat("Initial log-posterior:", 
-      do.call(log_post_fun, c(list(current_params), data_args)), "\n")
-  
-  for (i in 1:n_iter) {
-    # Step 1: propose new parameters
-    proposal <- rnorm(n_params, mean = current_params, sd = proposal_sd)
-    
-    # Step 2: evaluate log-posteriors
-    log_post_current <- do.call(log_post_fun, c(list(params = current_params), data_args))
-    log_post_proposal <- do.call(log_post_fun, c(list(params = proposal), data_args))
-    
-    # Step 3: compute acceptance probability
-    log_accept_ratio <- log_post_proposal - log_post_current
-    accept_prob <- exp(log_accept_ratio)
-    if (is.na(accept_prob) || is.nan(accept_prob)) accept_prob <- 0
-    
-    # Step 4: accept/reject
-    if (runif(1) < accept_prob) {
-      current_params <- proposal
-      accept_count <- accept_count + 1}
-    
-    # Save only key parameters
-    chain_full[i, ] <- c(current_params[1],      # beta0
-                         current_params[2],      # beta1
-                         exp(current_params[3]))} # rho (on original scale)
-  
-  cat("Acceptance rate:", accept_count / n_iter, "\n")
-  
-  # Apply burn-in and thinning
-  kept_iters <- seq(burn_in + 1, n_iter, by = thin)
-  chain_final <- chain_full[kept_iters, , drop = FALSE]
-  
-  return(chain_final)}
+
+## part three : model structures using INLA------
+
+## add SPDE to binomial logit to estimate spatial effects (range parameter and variance)
+dat <- nw_rdt
+
+# 1) Project lon/lat to km (simple equirectangular; good enough for moderate extents)
+R <- 6371  # Earth radius in km
+lat0 <- mean(dat$lat, na.rm=TRUE) * pi/180
+x_km <- R * (dat$long * pi/180) * cos(lat0)
+y_km <- R * (dat$lat * pi/180)
+coords <- cbind(x_km, y_km)
+
+# 2) Mesh
+mesh <- inla.mesh.2d(loc = coords,
+        max.edge = c(5, 20),   # inner/outer triangle sizes in km (tune to your domain)
+        cutoff   = 1)           # merge near-duplicate points (km)
+
+# 3) SPDE with PC priors (set range scale to your domain)
+spde <- inla.spde2.pcmatern(mesh = mesh, alpha = 2,
+  prior.range = c(15, 0.5),  # P(range < 15 km) = 0.5  
+  prior.sigma = c(1, 0.01))   # P(sigma > 1) = 0.01
+
+# 4) Index + projector matrix
+spde_idx <- inla.spde.make.index("spatial", n.spde = spde$n.spde)
+A_obs <- inla.spde.make.A(mesh, loc = coords)
+
+# 5) Stack (observations only)
+stack_obs <- inla.stack(
+  data = list(y = dat$rdt),
+  A    = list(A_obs, 1),
+  effects = list(
+    spatial = spde_idx,
+    data.frame(Intercept   = 1,
+      nearest_dist = dat$nearest_distc,
+      elevation    = dat$elevationb,
+      age          = dat$agec,
+      sex          = dat$female,
+      dhs_2022     = dat$dhs_2022,
+      mis_2017     = dat$mis_2017,
+      dhs_2015     = dat$dhs_2015,
+      ais_2011     = dat$ais_2011,
+      urban        = dat$urban,
+      wealth       = dat$wealthc)),tag = "obs")
+
+# 6a) Model 1 formula
+formula1 <- y ~ 0 + Intercept + nearest_dist + f(spatial, model = spde)
+
+# 6b) Model 2 formula
+formula2 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + 
+            dhs_2022 + mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial, model = spde)
+
+# 7) Prediction grid
+pred_grid <- expand.grid(long = seq(29.4, 35, length.out = 200),
+                         lat  = seq(-5.5, -0.5, length.out = 200))
+
+# Convert to sf with WGS84 CRS
+pred_grid_sf <- st_as_sf(pred_grid, coords = c("long", "lat"), crs = 4326)
+# Also convert observed DHS clusters to sf
+nw_rdt_sf <- st_as_sf(nw_rdt, coords = c("long", "lat"), crs = 4326)
+# extract coordinates for INLA
+pred_coords <- st_coordinates(pred_grid_sf)
+A_pred <- inla.spde.make.A(mesh, loc = pred_coords)
+
+# Ensure mines are sf
+mine_times_sf <- st_as_sf(mine_times, coords = c("long", "lat"), crs = 4326)
+# Compute nearest mine distance for each grid cell
+nearest_distances <- st_distance(pred_grid_sf, mine_times_sf)
+pred_grid_sf$nearest_dist <- apply(nearest_distances, 1, min)
+# Convert from units object to numeric (meters → km if you want)
+pred_grid_sf$nearest_dist <- as.numeric(pred_grid_sf$nearest_dist) / 1000  # in km
+
+# 8) Prediction stack
+pred_coords <- st_coordinates(pred_grid_sf)
+n_pred <- nrow(pred_coords)
+A_pred <- inla.spde.make.A(mesh, loc = pred_coords)
+
+stack_pred <- inla.stack(
+  data = list(y = NA),
+  A    = list(A_pred, 1),
+  effects = list(
+    spatial = 1:spde$n.spde,
+    data.frame(Intercept    = rep(1, n_pred),
+      nearest_dist = pred_grid_sf$nearest_dist,
+      elevation    = NA,
+      age          = NA,
+      sex          = NA,
+      dhs_2022     = NA,
+      mis_2017     = NA,
+      dhs_2015     = NA,
+      ais_2011     = NA,
+      urban        = NA,
+      wealth       = NA)),tag = "pred")
+
+# Combine observed + prediction stacks for models
+stack_full <- inla.stack(stack_obs, stack_pred)
 
 
-#plots to review traces and posterior density from MCMC sampling
-plot_mcmc_diagnostics <- function(chain) {
-  par(mfrow = c(3, 2), mar = c(4, 4, 2, 1))
-  
-  param_names <- colnames(chain)
-  
-  for (j in seq_along(param_names)) {
-    param <- chain[, j]
-    
-    # Trace plot
-    plot(param, type = "l", col = "steelblue",
-         main = paste("Trace:", param_names[j]),
-         xlab = "Iteration", ylab = param_names[j])
-    
-    # Posterior density
-    dens <- density(param)
-    plot(dens, main = paste("Density:", param_names[j]),
-         xlab = param_names[j], ylab = "Density", col = "darkorange", lwd = 2)
-    abline(v = mean(param), col = "red", lty = 2) # posterior mean
-  }
-  
-  par(mfrow = c(1, 1))}
+## fit model 1 (only proximity as predictor)
+#model_1 <- inla(formula1, data = inla.stack.data(stack_full),
+#                family = "binomial", control.family = list(link = "logit"),
+#                control.fixed = list(mean.intercept = 0, prec.intercept = 1e-4,
+#                mean = 0, prec = 1e-4),
+#                control.predictor = list(A = inla.stack.A(stack_full), compute = TRUE),
+#                control.compute   = list(dic=TRUE, waic=TRUE, cpo=TRUE, config=TRUE))
+
+## fit model 2 (proximity + DAG adjustment DHS variables)
+model_2 <- inla(formula2, data = inla.stack.data(stack_full),
+                family = "binomial",
+                control.family = list(link = "logit"),
+                control.fixed = list(mean.intercept = 0, prec.intercept = 1e-4,
+                  mean = 0, prec = 1e-4),
+                control.predictor = list(A = inla.stack.A(stack_full), compute = TRUE),
+                control.compute   = list(dic=TRUE, waic=TRUE, cpo=TRUE, config=TRUE))
+
+# Extract predictions
+#idx_pred1 <- inla.stack.index(stack_full, "pred")$data
+#pred1_mean <- model_1$summary.fitted.values[idx_pred1, "mean"]
+
+idx_pred2 <- inla.stack.index(stack_full, "pred")$data
+pred2_mean <- model_2$summary.fitted.values[idx_pred2, "mean"]
+
+# Attach to grid sf object
+#pred_grid_sf$pred1 <- pred1_mean
+pred_grid_sf$pred2 <- pred2_mean
+
+# Back-transform from logit to probability
+#pred_grid_sf$pred1_prob <- plogis(pred_grid_sf$pred1)
+pred_grid_sf$pred2_prob <- plogis(pred_grid_sf$pred2)
+
+##summary of model parameters
+#model_1[["summary.fixed"]]
+#model_1[["summary.hyperpar"]]
+model_2[["summary.fixed"]]
+model_2[["summary.hyperpar"]]
 
 
-#compute starting values for model 1 chain
-# x: mine proximity (vector), y: 0/1 RDT outcome, cluster_id: factor or integer per row
-# Keep only complete cases for y, x, and cluster_id
-# ---- 1) Clean, keep only rows needed for the model
-model_df <- nw_rdt[, c("nearest_dist", "HML35", "HV001", "long", "lat", "year.x")]
 
+## part four: map effects from models -----
 
-# Ensure y is 0/1 numeric (not factor/labels)
-y <- as.integer(model_df$HML35)
-# If HML35 isn’t already 0/1, map here, e.g.:
-# y <- ifelse(model_df$HML35 %in% c(1, "positive", "Yes"), 1, 0)
+# Fix invalid geometries
+district_valid <- st_make_valid(district)
+# Now union them
+tanzania_boundary <- st_union(district_valid)
 
-# Predictor
-x <- model_df$nearest_dist
-x_std <- as.numeric(scale(x))
+# Re-project prediction grid to match boundary CRS (or vice versa)
+pred_grid_sf <- st_transform(pred_grid_sf, st_crs(tanzania_boundary))
 
-# ---- 2) Make a cluster-level table with unique coords
-cluster_tbl <- model_df %>%
-  distinct(year.x, HV001, long, lat) %>%   # include survey year
-  arrange(year.x, HV001) %>%
-  mutate(cluster_id = row_number())
+# Clip the prediction grid to the Tanzania boundary
+pred_grid_clipped <- pred_grid_sf[tanzania_boundary, ]  
+pred_grid_clipped <- pred_grid_sf[st_within(st_centroid(pred_grid_sf), tanzania_boundary, sparse = FALSE), ]
 
-cluster_tbl_unique <- cluster_tbl %>%
-  distinct(HV001, year.x, cluster_id, .keep_all = FALSE)
+#pull DHS clusters for map
+nw_cluster <- nw_rdt[,c("lat", "long", "svy", "rdt")]
+cluster_prev <- nw_cluster %>% group_by(lat, long, svy) %>% summarise(n = n(), positives = sum(rdt, na.rm = TRUE),
+    prevalence = mean(rdt, na.rm = TRUE)) %>% ungroup()
 
+#subset clusters into survey waves
+#prev_22 <- cluster_prev %>% filter(svy=="dhs_2022")
+#prev_17 <- cluster_prev %>% filter(svy=="mis_2017")
+#prev_15 <- cluster_prev %>% filter(svy=="dhs_2015")
+#prev_11 <- cluster_prev %>% filter(svy=="ais_2011")
 
-K <- nrow(cluster_tbl)
+## map effects, this is predicted prevalence(?) at all pixels and over a 4 waves..
+#model1_map <- ggplot() +
+#  geom_sf(data = bounds, fill = "grey95") +
+#  geom_sf(data = Victoria, fill = "skyblue", color = "skyblue")+
+#  geom_sf(data = district, color="black") +
+#  geom_sf(data = pred_grid_clipped, aes(color = pred1_prob)) +
+#  scale_color_viridis_c(option = "magma", name = "Predicted prevalence", direction = 1) +
+#  new_scale("fill") + # Reset fill scale for mines
+#  geom_sf(data = mine_times_sf,
+#    aes(shape = size, fill = size),
+#    size = 2, alpha = 0.5) +
+#  scale_shape_manual(values = c("artisanal" = 24, "industrial" = 22),
+#    name   = "Mine type") +
+#  scale_fill_manual(values = c("artisanal" = "pink3", "industrial" = "maroon4"),
+#    name   = "Mine type") +
+#  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) + theme_void() + 
+#  ggtitle("Model 1, proximity as only predictor")
+#  coord_sf(xlim = c(30.0, 34.4), ylim = c(-4.6, -2.6)) 
+#model1_map
 
-# ----- 3) Build Dmat at the CLUSTER level (K x K)
-coords_mat <- as.matrix(cluster_tbl[, c("long", "lat")])
-Dmat <- distm(coords_mat) / 1000  # km
+model2_map <- ggplot() +
+  geom_sf(data = bounds, fill = "grey95") +
+  geom_sf(data = Victoria, fill = "skyblue", color = "skyblue")+
+#  geom_sf(data = district, color="black") +
+  geom_point(data = nw_cluster, aes(x=long, y=lat), color="white") +
+  geom_sf(data = pred_grid_clipped, aes(color = pred2_prob)) +
+  scale_color_viridis_c(option = "magma", name = "Predicted prevalence", direction = -1) +
+  new_scale("fill") + # Reset fill scale for mines
+  geom_sf(data = mine_times_sf,
+         aes(shape = size, fill = size),
+          size = 2, alpha = 0.5) +
+  scale_shape_manual(values = c("artisanal" = 24, "industrial" = 22),
+                     name   = "Mine type") +
+  scale_fill_manual(values = c("artisanal" = "pink3", "industrial" = "maroon4"),
+                    name   = "Mine type") +
+  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) + theme_void() + 
+  ggtitle("Model 2: proximity + DHS covariates in DAG adjustment set")
+#model2_map
 
-# ---- 4) Map each row to its cluster index 1..K
-model_df <- model_df %>%
-  left_join(
-    dplyr::select(cluster_tbl_unique, HV001, year.x, cluster_id),
-    by = c("HV001", "year.x"))
+#ggsave("C:/Users/cgait/OneDrive/Desktop/model2.jpeg", 
+#       width = 20, height = 15, units = c("cm"),  model2_map)
 
-cluster_ids <- model_df$cluster_id  # integers in 1..K
-
-# Safety checks
-stopifnot(length(x_std) == length(y),
-          length(cluster_ids) == length(y),
-          all(cluster_ids >= 1 & cluster_ids <= K),
-          nrow(Dmat) == K, ncol(Dmat) == K)
-
-
-length(unique(model_df$HV001))
-length(unique(nw_rdt$HV001))
-
-
-# ---- 5) Starting values
-eps <- 1e-6
-p_bar <- mean(y)
-p_bar <- min(max(p_bar, eps), 1 - eps)
-beta0_start <- qlogis(p_bar)
-
-beta1_start <- 0
-suppressWarnings({
-  fit0 <- try(glm(y ~ x_std, family = binomial()), silent = TRUE)
-})
-if (!inherits(fit0, "try-error")) {
-  b <- suppressWarnings(coef(fit0))
-  if (!any(is.na(b))) beta1_start <- unname(b[2])
-}
-
-dvals <- Dmat[upper.tri(Dmat)]
-dvals <- dvals[dvals > 0]
-rho_start <- if (length(dvals)) quantile(dvals, 0.75, na.rm = TRUE) else 10
-log_rho_start <- log(rho_start)
-
-s_start <- rep(0, K)
-
-start_vals1 <- c(beta0_start, beta1_start, log_rho_start, s_start)
-proposal_sd1 <- c(0.15, 0.15, 0.08, rep(0.10, K))
-
-data_args <- list(
-  y = y,
-  x = x_std,
-  cluster_ids = cluster_ids,
-  Dmat = Dmat)
-
-# Optional: quick preflight to fail fast if sizes don’t match
-preflight <- function(params, data_args) {
-  K <- nrow(data_args$Dmat)
-  stopifnot(length(params) == 3 + K)
-  stopifnot(all(is.finite(unlist(data_args))))
-  TRUE
-}
-preflight(start_vals1, data_args)
-
-
-## run chain using Dmat, RDT outcomes (y), mine proximity (x), cluster ids.. 
-pilot_chain <- run_mcmc(
-  start = start_vals1,
-  n_iter = 4000, burn_in = 1000, thin = 5,
-  log_post_fun = log_model1,
-  proposal_sd = proposal_sd1,
-  data_args = data_args)
-
-plot_mcmc_diagnostics(pilot_chain)
-
+#prev22_map <- ggplot() +
+#  geom_sf(data = bounds, fill = "grey95") +
+#  geom_sf(data = Victoria, fill = "skyblue", color = "skyblue")+
+#    geom_sf(data = district, color="gray5") + new_scale("fill") +
+#  geom_point(data = prev_22, aes(x=long, y=lat, fill=prevalence), shape=21, size=3.5) +
+#  scale_fill_viridis_c(option = "viridis", name = "Prevalence", direction=-1)+
+#  new_scale("fill") +
+#  geom_sf(data = mine_times_sf,
+#          aes(shape = size, fill = size),
+#          size = 2.9, alpha = 0.5) +
+#  scale_shape_manual(values = c("artisanal" = 24, "industrial" = 22),
+#                     name   = "Mine type") +
+#  scale_fill_manual(values = c("artisanal" = "pink3", "industrial" = "maroon4"),
+#                    name   = "Mine type") +
+#  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) + theme_void() +
+#  ggtitle("2022 MIS")
+#svys_prev <- ggarrange(prev22_map, prev17_map, prev15_map, prev11_map, nrow=2, ncol=2)
