@@ -1,10 +1,11 @@
 ## Malaria in TZ national surveys from 2011-2022, predicted by proximity to artisanal and industrial mines----
 
-#part one: data extract and organization----
+## part one: data extract and organization----
 
 #load packages
 library(broom)
 library(broom.mixed)
+#library(concaveman)
 library(dplyr)
 library(geosphere)
 library(ggnewscale)
@@ -16,6 +17,7 @@ library(jsonlite)
 library(lwgeom)
 library(MASS)
 library(Matrix)
+library(mice)
 library(pscl)
 library(purrr)
 library(readr)
@@ -29,7 +31,6 @@ library(tidyverse)
 library(viridis)
 library(writexl)
 
-
 #DHS 2022 household member recode
 TZ22_pr <- read_sas("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_DHS22/TZPR82SD/TZPR82FL.SAS7BDAT")
 #MIS 2017 household member recode
@@ -38,8 +39,6 @@ TZ17_pr <- read_sas("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_MIS17/TZP
 TZ15_pr <- read_sas("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_DHS15/TZPR7BSD/TZPR7BFL.SAS7BDAT")
 #AIS 2011-12 household member recode
 TZ11_pr <- read_sas("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_AIS11/TZPR6ASD/TZPR6AFL.SAS7BDAT")
-#DHS 2010 household member recode
-#TZ10_pr <- read_sas("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_DHS10/TZPR63SD/TZPR63FL.SAS7BDAT")
 
 #geography data & geocovariates for all surveys
 geo_22 <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_DHS22/TZGE81FL/TZGE81FL.shp")
@@ -50,8 +49,6 @@ geo_15 <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_DHS15/TZGE7
 geo_cov15 <- read.csv("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_DHS15/TZGC7BFL/TZGC7BFL.csv")
 geo_11 <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_AIS11/TZGE6AFL/TZGE6AFL.shp")
 geo_cov11 <- read.csv("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_AIS11/TZGC6BFL/TZGC6BFL.csv")
-#geo_10 <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_DHS10/TZ_DHS10_geo/TZGE61FL/TZGE61FL.shp")
-#geo_cov10 <- read.csv("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_DHS10/TZ_DHS10_geo/TZGC62FL/TZGC62FL.csv")
 
 #artisinal mines in north west Tanzania
 mines <- fromJSON("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/tza_mines_curated_all_opendata_p_ipis.json")
@@ -59,20 +56,8 @@ mines <- as.data.frame(mines)
 #bigger mines in north west TZ manually compiled from mention in the IPIS report 
 big_mines <- read_excel("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/big_mines.xlsx")
 
-#and roads
-#roads <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/hotosm_tza_roads_lines_shp/hotosm_tza_roads_lines_shp.shp")
-#subset road data 
-#roi <- st_bbox(c(xmin = 29.4, xmax = 35, ymin = -5.5, ymax = -0.5), crs = st_crs(roads)) |> st_as_sfc()
-#roads_crop <- st_crop(roads, roi)
-#roads_path <- roads_crop %>% filter(highway=="path")
-#roads_res <- roads_crop %>% filter(highway=="residential")
-#roads_foot <- roads_crop %>% filter(highway=="footway")
-#roads_123 <- roads_crop %>% filter(highway %in% c("primary", "secondary", "tertiary"))
-# Export as shapefile (creates multiple files: .shp, .shx, .dbf, etc.)
-#st_write(roads_path, "C:/Users/cgait/OneDrive/Desktop/TZ mining/data/roads_shp/roads_path.shp")
-
 #read back in subsetted roads
-roads_123 <- st_read("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/roads_shp/roads_123.shp")
+#roads_123 <- st_read("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/roads_shp/roads_123.shp")
 #bordering countries in Africa
 africa <- st_read("C:/Users/cgait/OneDrive/Desktop/IDEEL/Rwanda nonpf/data/data downloads/Africa_Boundaries-shp/Africa_Boundaries.shp")
 #regional boundaries
@@ -95,6 +80,19 @@ mines$workers <- mines$features.properties$worker
 mines$fem_workers <- mines$features.properties$workerwomen
 # building structure permanence 
 mines$building <- mines$features.properties$buildingtype
+#other mine features
+mines$mineral <- mines$features.properties$mineral1name
+mines$num_pits <- mines$features.properties$pits
+mines$cyanide <- mines$features.properties$cyanide
+mines$mercury <- mines$features.properties$mercury
+#indicator for any chemical in use
+mines <- mines %>% mutate(cyanide = case_when(cyanide=="Yes" ~ 1, cyanide=="No" ~ 0))
+mines <- mines %>% mutate(mercury = case_when(mercury=="Yes" ~ 1, mercury=="No" ~ 0))
+mines$chem_sum <- mines$cyanide + mines$mercury              
+mines$site_type <- mines$features.properties$sitetype
+mines$facilities <- mines$features.properties$facilities
+mines$closetores <- mines$features.properties$closetoresidential
+
 # ~minimum years operational based on building type permanence
 mines <- mines %>% mutate(min_years = case_when(building=="None" ~ 0,
                    building=="Permanent" ~ 3, building=="Temporary/makeshift" ~ 1,
@@ -162,7 +160,6 @@ ccoord11 <- as.data.frame(st_drop_geometry(geo_11))[, c("HV001", "lat", "long")]
 ccoord12 <- ccoord11
 
 ## rdt positivity and other relevant variables extracted from household member recode survey data
-TZ22_pr$hml
 tz_dhs22 <- TZ22_pr[,c("HML35","HV104","HV105","HV106","HML10","HV001","HV002","HV003","HV006","HV012","HV013",
                        "HV040","HV201","HV201B","HV246","HV270")]
 tz_mis17 <- TZ17_pr[,c("HML35","HV104","HV105","HML10","HV001","HV002","HV003","HV006","HV012","HV013",
@@ -175,9 +172,6 @@ tz_dhs15$HV201B <- NA
 tz_ais11 <- TZ11_pr[,c("HML35","HV104","HV105","HV106","HML10","HV001","HV002","HV003","HV006","HV012","HV013",
                        "HV040","HV201","HV246","HV270")]
 tz_ais11$HV201B <- NA 
-#tz_dhs10 <- TZ10_pr %>% select(HV104,HV105,HV106,HML10,HV001,HV002,HV003,HV006,HV012,HV013,
-#                        HV040,HV201,HV246,HV270)
-#no HML35 in DHS10 ? Is there another coding or maybe not
 
 #join DHS geography data for clusters
 tz_dhs22 <- left_join(tz_dhs22, geo_22, by = "HV001")
@@ -185,117 +179,8 @@ tz_mis17 <- left_join(tz_mis17, geo_17, by = "HV001")
 tz_dhs15 <- left_join(tz_dhs15, geo_15, by = "HV001")
 tz_ais11 <- left_join(tz_ais11, geo_11, by = "HV001")
 
-
-## attach monthly ecology data to survey datasets based on survey month
-#re-defining survey years because vegetation is current not 1 month lagged
-tz_dhs16 <- subset(tz_dhs15, HV006 == 1| HV006 == 2)
-tz_dhs15 <- subset(tz_dhs15, HV006 == 8| HV006 == 9| HV006 == 10| HV006 == 11| HV006 == 12)
-tz_ais12 <- subset(tz_ais11, HV006 == 1| HV006 == 2| HV006 == 3| HV006 == 4| HV006 == 5)
-tz_ais11 <- subset(tz_ais11, HV006 == 12)
-
-tz_dhs22 <- left_join(tz_dhs22, vegi22, by = "HV001")
-tz_mis17 <- left_join(tz_mis17, vegi17, by = "HV001")
-tz_dhs16 <- left_join(tz_dhs16, vegi16, by = "HV001")
-tz_dhs15 <- left_join(tz_dhs15, vegi15, by = "HV001")
-tz_ais12 <- left_join(tz_ais12, vegi12, by = "HV001")
-tz_ais11 <- left_join(tz_ais11, vegi11, by = "HV001")
-
-#add avg_vim to each survey based on month!
-tz_dhs22 <- tz_dhs22 %>% mutate(veg = case_when(HV006 == 2 ~ vim_02,
-            HV006 == 3 ~ vim_03, HV006 == 4 ~ vim_04, HV006 == 5 ~ vim_05,
-            HV006 == 6 ~ vim_06, HV006 == 7 ~ vim_07))
-tz_mis17 <- tz_mis17 %>% mutate(veg = case_when(HV006 == 10 ~ vim_10,
-            HV006 == 11 ~ vim_11, HV006 == 12 ~ vim_12))
-tz_dhs16 <- tz_dhs16 %>% mutate(veg = case_when(HV006 == 1 ~ vim_01, HV006 == 2 ~ vim_02))
-tz_dhs15 <- tz_dhs15 %>% mutate(veg = case_when(HV006 == 8 ~ vim_08,
-            HV006 == 9 ~ vim_09, HV006 == 10 ~ vim_10, HV006 == 11 ~ vim_11,
-            HV006 == 12 ~ vim_12))
-tz_ais12 <- tz_ais12 %>% mutate(veg = case_when(HV006 == 1 ~ vim_01,
-            HV006 == 2 ~ vim_02, HV006 == 3 ~ vim_03, HV006 == 4 ~ vim_04,
-            HV006 == 5 ~ vim_05)) 
-tz_ais11 <- tz_ais11 %>% mutate(veg = case_when(HV006 == 11 ~ vim_11, HV006 == 12 ~ vim_12)) 
-
-#re-attach separated survey years ...
-tz_dhs15 <- rbind(tz_dhs15, tz_dhs16)
-tz_ais11 <- rbind(tz_ais11, tz_ais12)
-remove(tz_dhs16,tz_ais12)
-
-
-#CHIRPS prior monthly average precipitation 
-#subset rain into survey years..
-rain$HV001 <- rain$id
-rain <- rain[,c("HV001","year","month","avg_chirps")]
-
-#subset into survey years 
-rain22 <- subset(rain, year == 2022)
-rain17 <- subset(rain, year == 2017)
-rain16 <- subset(rain, year == 2016 & month %in% c("01"))
-rain15 <- subset(rain, year == 2015)
-rain12 <- subset(rain, year == 2012)
-rain11 <- subset(rain, year == 2011 & month %in% c("11","12"))
-
-#convert precipitation average into columns for each month
-rain22 <- rain22 %>% pivot_wider(names_from = month, values_from = avg_chirps)
-rain22 <- rain22 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
-rain17 <- rain17 %>% pivot_wider(names_from = month, values_from = avg_chirps)
-rain17 <- rain17 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
-rain16 <- rain16 %>% pivot_wider(names_from = month, values_from = avg_chirps)
-rain16 <- rain16 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
-rain15 <- rain15 %>% pivot_wider(names_from = month, values_from = avg_chirps)
-rain15 <- rain15 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
-rain12 <- rain12 %>% pivot_wider(names_from = month, values_from = avg_chirps)
-rain12 <- rain12 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
-rain11 <- rain11 %>% pivot_wider(names_from = month, values_from = avg_chirps)
-rain11 <- rain11 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
-
-#join rain data to each survey year
-#right now it's too confusing to keep them in original surveys and match by month and year
-#so will maybe condense in the future but for now this is easier
-tz_dhs16 <- subset(tz_dhs15, HV006 == 2)
-tz_dhs15 <- subset(tz_dhs15, HV006 == 8| HV006 == 9| HV006 == 10| HV006 == 11| HV006 == 12| HV006 == 1)
-tz_ais12 <- subset(tz_ais11, HV006 == 2| HV006 == 3| HV006 == 4| HV006 == 5)
-tz_ais11 <- subset(tz_ais11, HV006 == 12| HV006 == 1)
-
-tz_dhs22 <- left_join(tz_dhs22, rain22, by = "HV001")
-tz_mis17 <- left_join(tz_mis17, rain17, by = "HV001")
-tz_dhs16 <- left_join(tz_dhs16, rain16, by = "HV001")
-tz_dhs15 <- left_join(tz_dhs15, rain15, by = "HV001")
-tz_ais12 <- left_join(tz_ais12, rain12, by = "HV001")
-tz_ais11 <- left_join(tz_ais11, rain11, by = "HV001")
-
-#finally match based on survey month!
-tz_dhs22 <- tz_dhs22 %>% mutate(rain = case_when(HV006 == 2 ~ chirps_01,
-                         HV006 == 3 ~ chirps_02, HV006 == 4 ~ chirps_03,
-                         HV006 == 5 ~ chirps_04, HV006 == 6 ~ chirps_05, HV006 == 7 ~ chirps_06))
-tz_mis17 <- tz_mis17 %>% mutate(rain = case_when(HV006 == 10 ~ chirps_09,
-                         HV006 == 11 ~ chirps_10, HV006 == 12 ~ chirps_11))
-tz_dhs16 <- tz_dhs16 %>% mutate(rain = case_when(HV006 == 2 ~ chirps_01))
-tz_dhs15 <- tz_dhs15 %>% mutate(rain = case_when(HV006 == 1 ~ chirps_12,
-                         HV006 == 8 ~ chirps_07, HV006 == 9 ~ chirps_08,
-                         HV006 == 10 ~ chirps_09, HV006 == 11 ~ chirps_10, HV006 == 12 ~ chirps_11))
-tz_ais12 <- tz_ais12 %>% mutate(rain = case_when(HV006 == 2 ~ chirps_01,
-                        HV006 == 3 ~ chirps_02, HV006 == 4 ~ chirps_03, HV006 == 5 ~ chirps_04)) 
-tz_ais11 <- tz_ais11 %>% mutate(rain = case_when(HV006 == 1 ~ chirps_12, HV006 == 12 ~ chirps_11)) 
-
-#empty columns so we can merge :{
-tz_ais11$chirps_01 <- NA
-tz_ais11$chirps_02 <- NA
-tz_ais11$chirps_03 <- NA
-tz_ais11$chirps_04 <- NA
-tz_ais12$chirps_11 <- NA
-tz_ais12$chirps_12 <- NA
-tz_dhs15$chirps_01 <- NA
-tz_dhs16$chirps_07 <- NA
-tz_dhs16$chirps_08 <- NA
-tz_dhs16$chirps_09 <- NA
-tz_dhs16$chirps_10 <- NA
-tz_dhs16$chirps_11 <- NA
-tz_dhs16$chirps_12 <- NA
-
-#re-attach separated survey years ...
-tz_dhs15 <- rbind(tz_dhs15, tz_dhs16)
-tz_ais11 <- rbind(tz_ais11, tz_ais12)
-remove(tz_dhs16,tz_ais12)
+#removed CHIRPS rain and vegetation data attachment here
+#only keeping survey temperatures because it is so short
 
 #DHS monthly average temp (month of survey, not prior month)
 tz_dhs22 <- tz_dhs22 %>% mutate(dhs_temp = case_when(HV006 == 2 ~ Temperature_February,
@@ -326,6 +211,7 @@ remove(TZ22_pr, TZ17_pr, TZ15_pr, TZ11_pr, rain, rain22, rain17, rain15, rain16,
 
 
 #part two: create mine exposure data over time ----
+
 #add indicators for survey years and months
 tz_dhs22$svy <- "dhs_2022"
 tz_dhs22$svy_year <- 2022
@@ -360,14 +246,50 @@ mines$long <- mines$features.properties$longitude
 mines$lat <- mines$features.properties$latitude
 
 #subset mines data to years operational and coords
-mines_edit <- mines[,c("lat", "long", "year_open", "year_close")]
+mines_edit <- mines[,c("lat", "long", "year_open", "year_close", "mineral", "workers", "fem_workers",
+                       "building", "num_pits","cyanide","mercury","site_type","facilities","closetores" )]
 mines_edit$size <- "artisanal"
 bmines_edit <- big_mines[,c("lat", "long", "year_open", "year_close")]
 bmines_edit$size <- "industrial"
+bmines_edit$mineral <- c(NA, NA, NA, NA, NA, NA)
+bmines_edit$workers <- c(NA, NA, NA, NA, NA, NA)
+bmines_edit$fem_workers <- c(NA, NA, NA, NA, NA, NA)
+bmines_edit$building <- c(NA, NA, NA, NA, NA, NA)
+bmines_edit$num_pits <- c(NA, NA, NA, NA, NA, NA)
+bmines_edit$cyanide <- c(NA, NA, NA, NA, NA, NA)
+bmines_edit$mercury <- c(NA, NA, NA, NA, NA, NA)
+bmines_edit$site_type <- c(NA, NA, NA, NA, NA, NA)
+bmines_edit$facilities <- c(NA, NA, NA, NA, NA, NA)
+bmines_edit$closetores <- c(NA, NA, NA, NA, NA, NA)
+
 mine_times <- rbind(mines_edit, bmines_edit)
 remove(mines_edit, bmines_edit, geo_list)
 
 
+## imputation for missing number of pits 
+## using R MICE
+mines_missing <- mine_times[,c("workers","fem_workers","building","mineral","num_pits", 
+                               "cyanide","mercury","site_type","facilities","closetores")]
+## missing data patterns 
+#md.pattern(mines_missing)
+#md.pattern(mine_times)
+
+## by default it does 5 imputations using all variables for the missing data model
+mines_imp <- mice(mines_missing, m = 30)
+
+# completed dataset for the 1st imputation
+complete1 <- complete(mines_imp, 1)
+
+# completed dataset for all imputations stacked together
+all_complete <- complete(mines_imp, "long")  # adds a .imp column
+
+#hist(mine_times$num_pits)
+#densityplot(mines_imp, ~ num_pits)
+mine_times_imp1 <- complete(mines_imp, 1)   # dataset with imputed values filled
+mine_times$num_pits_imp1 <- mine_times_imp1$num_pits
+
+
+#function to calculate proximity measures for each cluster based on mines active each year
 calculate_proximity <- function(year, mine_data, cluster_coords) {
   # Filter active mines for the given year
   mines <- mine_data %>% filter(year_open <= year & year_close > year)
@@ -381,31 +303,42 @@ calculate_proximity <- function(year, mine_data, cluster_coords) {
   cluster_coords <- cluster_coords %>% dplyr::select(HV001, lat, long)
   
   # Calculate distances
-  distances <- apply(cluster_coords[, c("lat", "long")], 1, function(point) distHaversine(point, mine_coords))
-  big_distances <- apply(cluster_coords[, c("lat", "long")], 1, function(point) distHaversine(point, big_mine_coords))
+  distances <- apply(cluster_coords[, c("lat", "long")], 1,
+                     function(point) distHaversine(point, mine_coords))
+  big_distances <- apply(cluster_coords[, c("lat", "long")], 1,
+                         function(point) distHaversine(point, big_mine_coords))
   
-  # Count mines within 15 km
-  mines_within_15km <- apply(distances, 2, function(d) sum(d < 15000))
-  big_mines_within_15km <- apply(big_distances, 2, function(d) sum(d < 15000))
+  # Count mines within 21.08 km
+  mines_within_rho <- apply(distances, 2, function(d) sum(d < 21080))
+  big_mines_within_rho <- apply(big_distances, 2, function(d) sum(d < 21080))
   
   # Find nearest distances
-  nearest_distances <- apply(distances, 2, min) / 1000 # Convert to km
-  nearest_big_distances <- apply(big_distances, 2, min) / 1000 # Convert to km
+  nearest_distances <- apply(distances, 2, min) / 1000 # km
+  nearest_big_distances <- apply(big_distances, 2, min) / 1000 # km
+  
+  # Find nearest mine indices and get num_pits
+  nearest_indices <- apply(distances, 2, which.min)
+  nearest_num_pits <- mines$num_pits_imp1[nearest_indices]
+  
+  # Average num_pits within 21 km (estimated rho using Model 3)
+  avg_pits_rho <- apply(distances, 2, function(d) {
+    pits <- mines$num_pits_imp1[d < 21080]
+    if (length(pits) > 0) mean(pits, na.rm = TRUE) else 0})
   
   # Add proximity calculations to cluster data
   cluster_data <- cluster_coords %>%
     mutate(
-      !!paste0("num_mines", year) := mines_within_15km,
+      !!paste0("num_mines_rho", year) := mines_within_rho,
       !!paste0("total_distances", year) := apply(distances, 2, sum) / 1000,
       !!paste0("mean_distances", year) := apply(distances, 2, mean) / 1000,
-      !!paste0("num_bmines", year) := big_mines_within_15km,
+      !!paste0("num_bmines_rho", year) := big_mines_within_rho,
       !!paste0("nearest_dist", year) := nearest_distances,
       !!paste0("big_dist", year) := nearest_big_distances,
       !!paste0("close_mine", year) := if_else(nearest_distances <= 15, 1, 0),
-      !!paste0("close_big", year) := if_else(nearest_big_distances <= 15, 1, 0)
-    )
+      !!paste0("close_big", year) := if_else(nearest_big_distances <= 15, 1, 0),
+      !!paste0("nearest_num_pits", year) := nearest_num_pits,
+      !!paste0("avg_pits_rho", year) := avg_pits_rho)
   
-  # Return updated cluster data
   return(cluster_data)
 }
 
@@ -440,9 +373,10 @@ proximity_data <- lapply(survey_years, function(year) {
       !!paste0("total_distances", year),
       !!paste0("mean_distances", year),
       !!paste0("big_dist", year),
-      !!paste0("num_mines", year),
-      !!paste0("num_bmines", year)
-    )
+      !!paste0("num_mines_rho", year),
+      !!paste0("num_bmines_rho", year),
+      !!paste0("nearest_num_pits", year),
+      !!paste0("avg_pits_rho", year))
 })
 names(proximity_data) <- paste0("prox", survey_years)
 
@@ -491,15 +425,11 @@ nw_rdt <- nw_rdt %>% mutate(age_cat = case_when(HV105 < 15 ~ "15 years or younge
                      HV105 <= 65 & HV105 > 55 ~ "56-65 years old"))
 nw_rdt$edu_cat <- as.factor(nw_rdt$HV106)
 nw_rdt <- nw_rdt %>% mutate(edu_catb = case_when(HV106==0 ~ "Primary or no education",
-                     HV106==1 ~ "Primary or no education",
-                     HV106==2 ~ "Secondary education",
+                     HV106==1 ~ "Primary or no education", HV106==2 ~ "Secondary education",
                      HV106==3 ~ "Secondary education"))
 
 #binary variable for water source (water_cat, 1 = piped, 0 = unpiped)
 nw_rdt$water_cat <- cut(nw_rdt$HV201, breaks=c(0, 12, Inf), labels=c(0,1), include.lowest = TRUE) 
-#nw_rdt <- nw_rdt %>% mutate(wealthb = case_when(HV270==1 ~ "Wealth quintiles 1 & 2",
-#                     HV270==2 ~ "Wealth quintiles 1 & 2", HV270==3 ~ "Wealth quintiles 3-5",
-#                     HV270==4 ~ "Wealth quintiles 3-5", HV270==5 ~ "Wealth quintiles 3-5"))
 
 #rename a couple of cluster level variables
 nw_rdt$cluster <- nw_rdt$HV001
@@ -521,7 +451,8 @@ nw_rdt <- nw_rdt %>% mutate(female = case_when(HV104==2 ~ 1, TRUE ~ 0))
 
 #center all continuous variables around means
 #recode nearest_dist to represent proximity (larger values = closer distance)
-nw_rdt$nearest_dist <- 60-nw_rdt$nearest_dist 
+max_dist <- max(nw_rdt$nearest_dist)
+nw_rdt$nearest_dist <- max_dist-nw_rdt$nearest_dist 
 mean_dist <- mean(nw_rdt$nearest_dist)
 nw_rdt$nearest_distc <- nw_rdt$nearest_dist - mean_dist
 
@@ -539,80 +470,76 @@ nw_rdt <- nw_rdt %>% mutate(mis_2017 = case_when(svy=="mis_2017" ~ 1, TRUE ~ 0))
 nw_rdt <- nw_rdt %>% mutate(dhs_2015 = case_when(svy=="dhs_2015" ~ 1, TRUE ~ 0))
 nw_rdt <- nw_rdt %>% mutate(ais_2011 = case_when(svy=="ais_2011" ~ 1, TRUE ~ 0))
 
+#proximity to an industrial (big) mine
+max_indust <- max(nw_rdt$big_dist)
+nw_rdt$nearest_indust <- max_indust - nw_rdt$big_dist
+mean_indust <- mean(nw_rdt$nearest_indust)
+nw_rdt$nearest_industc <- nw_rdt$nearest_indust - mean_indust
+
+#interactions between number of pits at nearest mine, 
+#and average number of pits at miens within 21 km (model 3 rho estimate)
+table(nw_rdt$avg_pits_rho, useNA = "always")
+nw_rdt$npitxprox <- nw_rdt$nearest_num_pits*nw_rdt$nearest_dist
+nw_rdt$rho_pitxprox <- nw_rdt$avg_pits_rho*nw_rdt$nearest_dist
+nw_rdt$nmines_rho_x_avg_pits <- nw_rdt$avg_pits_rho*nw_rdt$num_mines_rho
+nw_rdt$avg_pits_x_prox <- nw_rdt$avg_pits_rho*nw_rdt$nearest_dist
+
 
 
 ## part three : model structures using INLA------
-
 ## add SPDE to binomial logit to estimate spatial effects (range parameter and variance)
 dat <- nw_rdt
 
-# 1) Project lon/lat to km (simple equirectangular; good enough for moderate extents)
-R <- 6371  # Earth radius in km
+# 1) Project lon/lat to km
+R <- 6371
 lat0 <- mean(dat$lat, na.rm=TRUE) * pi/180
 x_km <- R * (dat$long * pi/180) * cos(lat0)
 y_km <- R * (dat$lat * pi/180)
 coords <- cbind(x_km, y_km)
 
 # 2) Mesh
-mesh <- inla.mesh.2d(loc = coords,
-        max.edge = c(5, 20),   # inner/outer triangle sizes in km (tune to your domain)
-        cutoff   = 1)           # merge near-duplicate points (km)
+mesh <- inla.mesh.2d(loc = coords, max.edge = c(5, 20), cutoff   = 1)
 
-# 3) SPDE with PC priors (set range scale to your domain)
+# 3) SPDE
 spde <- inla.spde2.pcmatern(mesh = mesh, alpha = 2,
-  prior.range = c(15, 0.5),  # P(range < 15 km) = 0.5  
-  prior.sigma = c(1, 0.01))   # P(sigma > 1) = 0.01
-
+                            prior.range = c(15, 0.5), prior.sigma = c(1, 0.01))
 # 4) Index + projector matrix
 spde_idx <- inla.spde.make.index("spatial", n.spde = spde$n.spde)
 A_obs <- inla.spde.make.A(mesh, loc = coords)
 
-# 5) Stack (observations only)
+# 5) Stack (observations only) – adjust to your covariates
 stack_obs <- inla.stack(
   data = list(y = dat$rdt),
   A    = list(A_obs, 1),
-  effects = list(
-    spatial = spde_idx,
-    data.frame(Intercept   = 1,
-      nearest_dist = dat$nearest_distc,
-      elevation    = dat$elevationb,
-      age          = dat$agec,
-      sex          = dat$female,
-      dhs_2022     = dat$dhs_2022,
-      mis_2017     = dat$mis_2017,
-      dhs_2015     = dat$dhs_2015,
-      ais_2011     = dat$ais_2011,
-      urban        = dat$urban,
-      wealth       = dat$wealthc)),tag = "obs")
+  effects = list(spatial = spde_idx,
+                 data.frame(Intercept = 1,
+                            nearest_dist = dat$nearest_distc,
+                            elevation = dat$elevationb,
+                            age = dat$agec,
+                            sex = dat$female,
+                            dhs_2022 = dat$dhs_2022, mis_2017 = dat$mis_2017,
+                            dhs_2015 = dat$dhs_2015, ais_2011 = dat$ais_2011,
+                            urban = dat$urban,
+                            indust = dat$nearest_industc,
+                            wealth = dat$wealthc,
+                            nearest_num_pits = dat$nearest_num_pits,
+                            npitxprox = dat$npitxprox,
+                            num_mines_rho = dat$num_mines_rho,
+                            nmines_rho_x_avg_pits = dat$nmines_rho_x_avg_pits,
+                            avg_pits_x_prox = dat$avg_pits_x_prox)),tag = "obs")
 
-# 6a) Model 1 formula
-formula1 <- y ~ 0 + Intercept + nearest_dist + f(spatial, model = spde)
-
-# 6b) Model 2 formula
-formula2 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + 
-            dhs_2022 + mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial, model = spde)
-
-# 7) Prediction grid
-pred_grid <- expand.grid(long = seq(29.4, 35, length.out = 200),
-                         lat  = seq(-5.5, -0.5, length.out = 200))
-
-# Convert to sf with WGS84 CRS
+# 6) Prediction grid
+grid_extent = c(29.4, 35, -5.5, -0.5)
+pred_grid <- expand.grid(long = seq(grid_extent[1], grid_extent[2], length.out = 200),
+                         lat  = seq(grid_extent[3], grid_extent[4], length.out = 200))
 pred_grid_sf <- st_as_sf(pred_grid, coords = c("long", "lat"), crs = 4326)
-# Also convert observed DHS clusters to sf
-nw_rdt_sf <- st_as_sf(nw_rdt, coords = c("long", "lat"), crs = 4326)
-# extract coordinates for INLA
-pred_coords <- st_coordinates(pred_grid_sf)
-A_pred <- inla.spde.make.A(mesh, loc = pred_coords)
 
-# Ensure mines are sf
+# Compute nearest mine distance
 mine_times_sf <- st_as_sf(mine_times, coords = c("long", "lat"), crs = 4326)
-# Compute nearest mine distance for each grid cell
 nearest_distances <- st_distance(pred_grid_sf, mine_times_sf)
-pred_grid_sf$nearest_dist <- apply(nearest_distances, 1, min)
-# Convert from units object to numeric (meters → km if you want)
-pred_grid_sf$nearest_dist <- as.numeric(pred_grid_sf$nearest_dist) / 1000  # in km
+pred_grid_sf$nearest_dist <- apply(nearest_distances, 1, min) / 1000  # km
 
-# 8) Prediction stack
+# Prediction coords
 pred_coords <- st_coordinates(pred_grid_sf)
 n_pred <- nrow(pred_coords)
 A_pred <- inla.spde.make.A(mesh, loc = pred_coords)
@@ -622,65 +549,141 @@ stack_pred <- inla.stack(
   A    = list(A_pred, 1),
   effects = list(
     spatial = 1:spde$n.spde,
-    data.frame(Intercept    = rep(1, n_pred),
-      nearest_dist = pred_grid_sf$nearest_dist,
-      elevation    = NA,
-      age          = NA,
-      sex          = NA,
-      dhs_2022     = NA,
-      mis_2017     = NA,
-      dhs_2015     = NA,
-      ais_2011     = NA,
-      urban        = NA,
-      wealth       = NA)),tag = "pred")
+    data.frame(Intercept = rep(1, n_pred),
+               nearest_dist = pred_grid_sf$nearest_dist,
+               elevation = NA, age = NA, sex = NA,
+               dhs_2022 = NA, mis_2017 = NA, dhs_2015 = NA, ais_2011 = NA,
+               urban = NA, indust = NA, wealth = NA,
+               nearest_num_pits = NA, npitxprox = NA,
+               num_mines_rho = NA, avg_pits_rho = NA,
+               nmines_rho_x_avg_pits = NA, avg_pits_x_prox = NA)), tag = "pred")
 
-# Combine observed + prediction stacks for models
+# Combine observed + prediction stacks
 stack_full <- inla.stack(stack_obs, stack_pred)
 
 
-## fit model 1 (only proximity as predictor)
-#model_1 <- inla(formula1, data = inla.stack.data(stack_full),
-#                family = "binomial", control.family = list(link = "logit"),
-#                control.fixed = list(mean.intercept = 0, prec.intercept = 1e-4,
-#                mean = 0, prec = 1e-4),
-#                control.predictor = list(A = inla.stack.A(stack_full), compute = TRUE),
-#                control.compute   = list(dic=TRUE, waic=TRUE, cpo=TRUE, config=TRUE))
+#function to run INLA models with different formulas within the same framework
+run_inla_models <- function(dat, mine_times, formulas, grid_extent = c(29.4, 35, -5.5, -0.5)) {
+  
+  results <- list()
+  for (i in seq_along(formulas)) {
+    cat("Running model", i, "...\n")
+    fit <- inla(formulas[[i]], 
+            data = inla.stack.data(stack_full),
+            family = "binomial",
+            control.family = list(link = "logit"),
+            control.fixed = list(mean.intercept = 0, prec.intercept = 1e-4,
+                            mean = 0, prec = 1e-4),
+            control.predictor = list(A = inla.stack.A(stack_full), compute = TRUE),
+            control.compute   = list(dic=TRUE, waic=TRUE, cpo=TRUE, config=TRUE))
+    
+    idx_pred <- inla.stack.index(stack_full, "pred")$data
+    pred_mean <- fit$summary.fitted.values[idx_pred, "mean"]
+    pred_grid_sf[[paste0("pred", i)]] <- pred_mean
+    pred_grid_sf[[paste0("pred", i, "_prob")]] <- plogis(pred_mean)
+    results[[paste0("model_", i)]] <- fit}
+  
+  return(list(models = results, predictions = pred_grid_sf))
+}
 
-## fit model 2 (proximity + DAG adjustment DHS variables)
-model_2 <- inla(formula2, data = inla.stack.data(stack_full),
-                family = "binomial",
-                control.family = list(link = "logit"),
-                control.fixed = list(mean.intercept = 0, prec.intercept = 1e-4,
-                  mean = 0, prec = 1e-4),
-                control.predictor = list(A = inla.stack.A(stack_full), compute = TRUE),
-                control.compute   = list(dic=TRUE, waic=TRUE, cpo=TRUE, config=TRUE))
+# Define formulas (use the same naming as before, spde object will be built inside the function)
+formulas <- list(
+                #formula1 <- y ~ 0 + Intercept + nearest_dist + f(spatial, model = spde),
+                #formula2 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + 
+                #          dhs_2022 + mis_2017 + dhs_2015 + ais_2011 + urban + wealth,
+                formula3 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + 
+                         dhs_2022 + mis_2017 + dhs_2015 + ais_2011 + urban + wealth + 
+                         f(spatial, model = spde))#,
+                #formula4 <- y ~ 0 + Intercept + nearest_dist + indust + f(spatial, model = spde), 
+                #formula5 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + dhs_2022 + 
+                #         mis_2017 + dhs_2015 + ais_2011 + urban + wealth + indust + 
+                #         f(spatial, model = spde))
 
-# Extract predictions
-#idx_pred1 <- inla.stack.index(stack_full, "pred")$data
-#pred1_mean <- model_1$summary.fitted.values[idx_pred1, "mean"]
+#out <- run_inla_models(nw_rdt, mine_times, formulas)
 
-idx_pred2 <- inla.stack.index(stack_full, "pred")$data
-pred2_mean <- model_2$summary.fitted.values[idx_pred2, "mean"]
-
-# Attach to grid sf object
-#pred_grid_sf$pred1 <- pred1_mean
-pred_grid_sf$pred2 <- pred2_mean
-
-# Back-transform from logit to probability
-#pred_grid_sf$pred1_prob <- plogis(pred_grid_sf$pred1)
-pred_grid_sf$pred2_prob <- plogis(pred_grid_sf$pred2)
-
-##summary of model parameters
-#model_1[["summary.fixed"]]
-#model_1[["summary.hyperpar"]]
-model_2[["summary.fixed"]]
-model_2[["summary.hyperpar"]]
+# attach predictions to the preset grid
+#pred_grid_sf$pred3_prob <- out$predictions$pred1_prob
 
 
 
-## part four: map effects from models -----
+## part 4: EMM by mine characteristics
 
-# Fix invalid geometries
+## EMM assessed using models with interaction terms 
+## based on model 3 from above
+emm_formulas <- list(
+         # Model 6 formula (proximity + DHS covariates + number of pits + pitsxproximity)
+         formula6 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + 
+            dhs_2022 + mis_2017 + dhs_2015 + ais_2011 + urban + wealth + 
+            nearest_num_pits + npitxprox + f(spatial, model = spde),
+         # Model 7 formula (proximity + DHS covariates + number of mines within rho (21.08 km))
+         formula7 <- y ~ 0 + Intercept + num_mines_rho + elevation + age + sex + 
+            dhs_2022 + mis_2017 + dhs_2015 + ais_2011 + urban + wealth + avg_pits_rho +
+            nmines_rho_x_avg_pits + f(spatial, model = spde),
+         # Model 8 formula 
+         formula8 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + 
+            dhs_2022 + mis_2017 + dhs_2015 + ais_2011 + urban + wealth + 
+            avg_pits_rho + avg_pits_x_prox + f(spatial, model = spde))
+
+emm_out <- run_inla_models(nw_rdt, mine_times, emm_formulas)
+
+exp(emm_out$models$model_1$summary.fixed)
+exp(emm_out$models$model_2$summary.fixed)
+exp(emm_out$models$model_3$summary.fixed)
+
+
+## model 3 within strata of average number of pits within rho 
+#strata could be just 0, 0-6.308(mean), 6.308-8.4, 8.4-78.5, for quartiles....
+nearest0 <- nw_rdt %>% filter(nearest_num_pits<=2)
+nearest1 <- nw_rdt %>% filter(nearest_num_pits>2 & nearest_num_pits<=11.36)
+nearest2 <- nw_rdt %>% filter(nearest_num_pits>11.36 & nearest_num_pits<=50)
+nearest3 <- nw_rdt %>% filter(nearest_num_pits>50 & nearest_num_pits<=330)
+#pits0 <- nw_rdt %>% filter(avg_pits_rho==0)
+#pits1 <- nw_rdt %>% filter(avg_pits_rho>0 & avg_pits_rho<=1.5)
+#pits2 <- nw_rdt %>% filter(avg_pits_rho>1.5 & avg_pits_rho<=6.308)
+#pits3 <- nw_rdt %>% filter(avg_pits_rho>6.308)
+
+#outcome prevalence within strata
+pits0_prev <- sum(pits0$rdt)/nrow(pits0)
+pits1_prev <- sum(pits1$rdt)/nrow(pits1)
+pits2_prev <- sum(pits2$rdt)/nrow(pits2)
+pits3_prev <- sum(pits3$rdt)/nrow(pits3)
+#highest prevalence among pits1....next for pits0 but pits2 and 3 are not far off 
+nearest0_prev <- sum(nearest0$rdt)/nrow(nearest0)
+nearest1_prev <- sum(nearest1$rdt)/nrow(nearest1)
+nearest2_prev <- sum(nearest2$rdt)/nrow(nearest2)
+nearest3_prev <- sum(nearest3$rdt)/nrow(nearest3)
+#highest prevalence among strata 0 and 1 compared to 2 and 3...
+#hm why is there overall less prevalence with more pits ?
+
+#run model 3 within pit strata
+#pits0_out <- run_inla_models(pits0, mine_times, formulas)
+#pits1_out <- run_inla_models(pits1, mine_times, formulas)
+#pits2_out <- run_inla_models(pits2, mine_times, formulas)
+#pits3_out <- run_inla_models(pits3, mine_times, formulas)
+#nearest0_out <- run_inla_models(nearest0, mine_times, formulas)
+#nearest1_out <- run_inla_models(nearest1, mine_times, formulas)
+#nearest2_out <- run_inla_models(nearest2, mine_times, formulas)
+#nearest3_out <- run_inla_models(nearest3, mine_times, formulas)
+
+#exp(pits0_out$models$model_1$summary.fixed)
+#exp(pits1_out$models$model_1$summary.fixed)
+#exp(pits2_out$models$model_1$summary.fixed)
+#exp(pits3_out$models$model_1$summary.fixed)
+
+#exp(nearest0_out$models$model_1$summary.fixed)
+#exp(nearest1_out$models$model_1$summary.fixed)
+#exp(nearest2_out$models$model_1$summary.fixed)
+#exp(nearest3_out$models$model_1$summary.fixed)
+
+
+
+## part five: map effects from models -----
+#pull DHS clusters for map
+nw_cluster <- nw_rdt[,c("lat", "long", "svy", "rdt")]
+cluster_prev <- nw_cluster %>% group_by(lat, long, svy) %>% summarise(n = n(), positives = sum(rdt, na.rm = TRUE),
+                  prevalence = mean(rdt, na.rm = TRUE)) %>% ungroup()
+
+## clip effects grid to TZ district boundaries, first fix invalid geometries
 district_valid <- st_make_valid(district)
 # Now union them
 tanzania_boundary <- st_union(district_valid)
@@ -692,58 +695,33 @@ pred_grid_sf <- st_transform(pred_grid_sf, st_crs(tanzania_boundary))
 pred_grid_clipped <- pred_grid_sf[tanzania_boundary, ]  
 pred_grid_clipped <- pred_grid_sf[st_within(st_centroid(pred_grid_sf), tanzania_boundary, sparse = FALSE), ]
 
-#pull DHS clusters for map
-nw_cluster <- nw_rdt[,c("lat", "long", "svy", "rdt")]
-cluster_prev <- nw_cluster %>% group_by(lat, long, svy) %>% summarise(n = n(), positives = sum(rdt, na.rm = TRUE),
-    prevalence = mean(rdt, na.rm = TRUE)) %>% ungroup()
+
+#map effects! rewrite as function ?
+model3_map <- ggplot() +
+  geom_sf(data = bounds, fill = "grey95") +
+  geom_sf(data = Victoria, fill = "skyblue", color = "skyblue")+
+  geom_sf(data = pred_grid_clipped, aes(color = pred3_prob)) +
+  scale_color_viridis_c(option = "viridis", name = "Predicted prevalence", direction = -1) +
+  new_scale("fill") +
+  geom_sf(data = mine_times_sf, aes(shape = size, fill = size), size = 2, alpha = 0.6) +
+  scale_shape_manual(values = c("artisanal" = 24, "industrial" = 22), name = "Mine type") +
+  scale_fill_manual(values = c("artisanal" = "plum1", "industrial" = "tomato3"),name = "Mine type") +
+  geom_point(data = nw_cluster, aes(x=long, y=lat), color="grey45", shape=21, size=1.5) +
+  geom_sf(data = district, color="grey35", fill=NA) +
+  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) + theme_void() + 
+  ggtitle("Model 3: proximity + survey covariates")
+model3_map
+
+#ggsave("C:/Users/cgait/OneDrive/Desktop/pits2.jpeg", width=20, height=15, units=c("cm"), pits2_map)
+
+
+## DHS cluster level covariates
 
 #subset clusters into survey waves
 #prev_22 <- cluster_prev %>% filter(svy=="dhs_2022")
 #prev_17 <- cluster_prev %>% filter(svy=="mis_2017")
 #prev_15 <- cluster_prev %>% filter(svy=="dhs_2015")
 #prev_11 <- cluster_prev %>% filter(svy=="ais_2011")
-
-## map effects, this is predicted prevalence(?) at all pixels and over a 4 waves..
-#model1_map <- ggplot() +
-#  geom_sf(data = bounds, fill = "grey95") +
-#  geom_sf(data = Victoria, fill = "skyblue", color = "skyblue")+
-#  geom_sf(data = district, color="black") +
-#  geom_sf(data = pred_grid_clipped, aes(color = pred1_prob)) +
-#  scale_color_viridis_c(option = "magma", name = "Predicted prevalence", direction = 1) +
-#  new_scale("fill") + # Reset fill scale for mines
-#  geom_sf(data = mine_times_sf,
-#    aes(shape = size, fill = size),
-#    size = 2, alpha = 0.5) +
-#  scale_shape_manual(values = c("artisanal" = 24, "industrial" = 22),
-#    name   = "Mine type") +
-#  scale_fill_manual(values = c("artisanal" = "pink3", "industrial" = "maroon4"),
-#    name   = "Mine type") +
-#  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) + theme_void() + 
-#  ggtitle("Model 1, proximity as only predictor")
-#  coord_sf(xlim = c(30.0, 34.4), ylim = c(-4.6, -2.6)) 
-#model1_map
-
-model2_map <- ggplot() +
-  geom_sf(data = bounds, fill = "grey95") +
-  geom_sf(data = Victoria, fill = "skyblue", color = "skyblue")+
-#  geom_sf(data = district, color="black") +
-  geom_point(data = nw_cluster, aes(x=long, y=lat), color="white") +
-  geom_sf(data = pred_grid_clipped, aes(color = pred2_prob)) +
-  scale_color_viridis_c(option = "magma", name = "Predicted prevalence", direction = -1) +
-  new_scale("fill") + # Reset fill scale for mines
-  geom_sf(data = mine_times_sf,
-         aes(shape = size, fill = size),
-          size = 2, alpha = 0.5) +
-  scale_shape_manual(values = c("artisanal" = 24, "industrial" = 22),
-                     name   = "Mine type") +
-  scale_fill_manual(values = c("artisanal" = "pink3", "industrial" = "maroon4"),
-                    name   = "Mine type") +
-  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) + theme_void() + 
-  ggtitle("Model 2: proximity + DHS covariates in DAG adjustment set")
-#model2_map
-
-#ggsave("C:/Users/cgait/OneDrive/Desktop/model2.jpeg", 
-#       width = 20, height = 15, units = c("cm"),  model2_map)
 
 #prev22_map <- ggplot() +
 #  geom_sf(data = bounds, fill = "grey95") +
