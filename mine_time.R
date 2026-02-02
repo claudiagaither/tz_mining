@@ -175,8 +175,7 @@ tz_ais11 <- left_join(tz_ais11, geo_11, by = "HV001")
 #DHS monthly average temp (month of survey, not prior month)
 tz_dhs22 <- tz_dhs22 %>% mutate(dhs_temp = case_when(HV006 == 2 ~ Temperature_February,
             HV006 == 3 ~ Temperature_March, HV006 == 4 ~ Temperature_April,
-            HV006 == 5 ~ Temperature_May, HV006 == 6 ~ Temperature_June, 
-            HV006 == 7 ~ Temperature_July))
+            HV006 == 5 ~ Temperature_May, HV006 == 6 ~ Temperature_June,  HV006 == 7 ~ Temperature_July))
 tz_mis17 <- tz_mis17 %>% mutate(dhs_temp = case_when(HV006 == 10 ~ Temperature_October,
             HV006 == 11 ~ Temperature_November, HV006 == 12 ~ Temperature_December))
 tz_dhs15 <- tz_dhs15 %>% mutate(dhs_temp = case_when(HV006 == 1 ~ Temperature_January,
@@ -185,8 +184,7 @@ tz_dhs15 <- tz_dhs15 %>% mutate(dhs_temp = case_when(HV006 == 1 ~ Temperature_Ja
             HV006 == 11 ~ Temperature_November, HV006 == 12 ~ Temperature_December))
 tz_ais11 <- tz_ais11 %>% mutate(dhs_temp = case_when(HV006 == 1 ~ Temperature_January,
             HV006 == 2 ~ Temperature_February, HV006 == 3 ~ Temperature_March,
-            HV006 == 4 ~ Temperature_April, HV006 == 5 ~ Temperature_May,
-            HV006 == 12 ~ Temperature_December))
+            HV006 == 4 ~ Temperature_April, HV006 == 5 ~ Temperature_May, HV006 == 12 ~ Temperature_December))
 
 #remove original monthly variables
 tz_dhs22 <- tz_dhs22 %>% dplyr::select(-matches("^Temperature_|chirps|vim"))
@@ -230,7 +228,6 @@ tz_ais11 <- tz_ais11 %>% mutate(svy_year_dec = case_when(HV006==12 ~ svy_year+((
 tz_ais12 <- tz_ais11 %>% filter(svy_year == 2012)
 tz_ais11 <- tz_ais11 %>% filter(svy_year == 2011)
 
-
 #combine big and regular mine data
 mines$long <- mines$features.properties$longitude
 mines$lat <- mines$features.properties$latitude
@@ -239,20 +236,16 @@ mines$lat <- mines$features.properties$latitude
 mines_edit <- mines[,c("lat", "long", "year_open", "year_close", "mineral", "workers", "fem_workers",
                        "building", "num_pits","cyanide","mercury","site_type","facilities","closetores" )]
 mines_edit$size <- "artisanal"
-
-table(mines_edit$cyanide)
-
 bmines_edit <- big_mines[,c("lat", "long", "year_open", "year_close","mineral", "workers", "fem_workers",
                         "building", "num_pits","cyanide","mercury","site_type","facilities","closetores")]
 bmines_edit$size <- "industrial"
-
 mine_times <- rbind(mines_edit, bmines_edit)
 remove(mines_edit, bmines_edit, geo_list)
 
 
 ## imputation for missing number of pits 
 ## using R MICE
-set.seed(123)
+set.seed(124)
 mines_missing <- mine_times[,c("workers","fem_workers","building","mineral","num_pits", 
                                "cyanide","mercury","site_type","facilities","closetores")]
 ## missing data patterns 
@@ -311,8 +304,7 @@ calculate_proximity <- function(year, mine_data, cluster_coords) {
     if (length(pits) > 0) mean(pits, na.rm = TRUE) else 0})
   
   # Add proximity calculations to cluster data
-  cluster_data <- cluster_coords %>%
-    mutate(
+  cluster_data <- cluster_coords %>% mutate(
       !!paste0("num_mines_rho", year) := mines_within_rho,
       !!paste0("total_distances", year) := apply(distances, 2, sum) / 1000,
       !!paste0("mean_distances", year) := apply(distances, 2, mean) / 1000,
@@ -338,10 +330,8 @@ survey_coords <- list(`2022` = ccoord22,`2017` = ccoord17,`2016` = ccoord16,`201
 tz_geo_prox <- reduce(survey_years, function(data, year) {
   # Retrieve coordinates for the current year
   year_coords <- survey_coords[[as.character(year)]]
-  
   # Calculate proximity and combine results
   year_proximity <- calculate_proximity(year, mine_times, year_coords)
-  
   if (nrow(data) == 0) {
     year_proximity  # First iteration
   } else {
@@ -450,13 +440,18 @@ nw_rdt$nearest_indust <- max_indust - nw_rdt$big_dist
 mean_indust <- mean(nw_rdt$nearest_indust)
 nw_rdt$nearest_industc <- nw_rdt$nearest_indust - mean_indust
 
+#nearest number of pits recode
+nw_rdt <- nw_rdt %>% mutate(nnpits_4level = case_when(nearest_num_pits <= 2 ~ 0,
+                            nearest_num_pits > 2 & nearest_num_pits <= 18 ~ 1,
+                            nearest_num_pits > 18 & nearest_num_pits <= 160 ~ 2,
+                            nearest_num_pits > 160 & nearest_num_pits <= 500 ~ 3))
+
 #interactions between number of pits at nearest mine, 
 #and average number of pits at mines within 21 km (model 3 rho estimate)
 nw_rdt$npitxprox <- nw_rdt$nearest_num_pits*nw_rdt$nearest_dist
 nw_rdt$rho_pitxprox <- nw_rdt$avg_pits_rho*nw_rdt$nearest_dist
 nw_rdt$nmines_rho_x_avg_pits <- nw_rdt$avg_pits_rho*nw_rdt$num_mines_rho
 nw_rdt$avg_pits_x_prox <- nw_rdt$avg_pits_rho*nw_rdt$nearest_dist
-
 
 ## create cluster offsets
 clusters <- nw_rdt[,c("lat","long","urban","svy","HV001")]
@@ -481,9 +476,36 @@ sample_points <- cluster_buffers %>% mutate(samples = map(
   mutate(cluster_id = rep(cluster_buffers$cluster_id, each = 50))
 
 
+## bivariate analysis for risk factors to start 
+## define DHS survey design (weight = individual survey weight??)
+nw_rdt$wt <- 1
+DHS<-svydesign(id=nw_rdt$HV021, strata=nw_rdt$HV023, weights=nw_rdt$wt, data=nw_rdt, nest=TRUE)
+#clusters with only one participant (lonely psu)
+options(survey.lonely.psu="adjust")
+
+rdt_svy<- function(var) {m <- svyglm(as.formula(paste0('rdt ~', var)), DHS, family=quasibinomial("identity"))
+cbind(tidy(m), confint(m))}
+
+#continuous variables (temp or rain) struggle to map to pf and po with regular functions, but these trys will assist
+safe_rdt_svy <- function(var) {
+  result <- try(rdt_svy(var), silent = TRUE)
+  if (inherits(result, "try-error")) return(NULL)
+  return(result)}
+
+#variables for glms
+studyvars <-c("female","age","close_mine","close_big","HV270","urban","HV246","HV106","nnpits_4level",
+              "water_cat","hml1_cat","HML10","elevationb")
+
+#map across study variables
+nwsvy_glm<- map_dfr(studyvars, rdt_svy)
+colnames(nwsvy_glm) <- c('term','estimate','std.error','statistic','p.value','CIL_95','CIU_95')
+#nwsvy_glm %>% print(noSpaces=T) 
+
+## quick forest plot to display associations
 
 
-## part three : model structures using INLA------
+
+## part three : spatial model structures using INLA------
 ## add SPDE to binomial logit to estimate spatial effects (range parameter and variance)
 dat <- nw_rdt
 dat$urban <- as.numeric(as.character(dat$urban))
@@ -518,24 +540,9 @@ mine_times_sf <- st_as_sf(mine_times, coords = c("long", "lat"), crs = 4326)
 nearest_distances <- st_distance(pred_grid_sf, mine_times_sf)
 pred_grid_sf$nearest_dist <- apply(nearest_distances, 1, min) / 1000  # convert to km
 
-pred_grid_sf$nearest_distc <- (pred_grid_sf$nearest_dist - mean(dat$nearest_dist, na.rm=TRUE)) /
-  sd(dat$nearest_dist, na.rm=TRUE)
-
-#centered variable for nearest distance
-pred_nearest_distc <- pred_grid_sf$nearest_distc
-
-##calculate (stratum-specific?) means for variables that are mean-centered
-##using 0.5 for any binary indicators ig?
-## means for: elevationb, agec, female, urban, nearest_industc, wealthc, 
-## nearest_num_pits, npitxprox, num_mines_rho, nmines_rho_x_avg_pits, avg_pits_x_prox
-mean_elev <- mean(nw_rdt$elevationb)
-mean_fem <- mean(nw_rdt$female)
-mean_urban <- mean(nw_rdt$urban)
-mean_nnp <- mean(nw_rdt$nearest_num_pits)
-mean_npxp <- mean(nw_rdt$npitxprox)
-mean_nmr <- mean(nw_rdt$num_mines_rho)
-mean_nmrxap <- mean(nw_rdt$nmines_rho_x_avg_pits)
-avg_pits_x_prox = mean_apxp <- mean(nw_rdt$avg_pits_x_prox)
+#centered variable for nearest distance?
+grid_mean_dist <- mean(pred_grid_sf$nearest_dist)
+pred_grid_sf$nearest_distc <- pred_grid_sf$nearest_dist - grid_mean_dist
 
 
 ## run model within survey strata and overall
@@ -544,95 +551,202 @@ survey_strata <- list(ref_2022   = c(mis_2017 = 0, dhs_2015 = 0, ais_2011 = 0),
   dhs_2015 = c(mis_2017 = 0, dhs_2015 = 1, ais_2011 = 0),
   ais_2011 = c(mis_2017 = 0, dhs_2015 = 0, ais_2011 = 1))
 
-#function to run INLA models with different formulas within the same framework 
-run_inla_strata <- function(dat, mine_times, formulas) { 
 
-  # compute subset coords in same projection used to build mesh 
-  lat0 <- mean(dat$lat, na.rm = TRUE) * pi/180 
-  R <- 6371 
-  x_km <- R * (dat$long * pi/180) * cos(lat0) 
-  y_km <- R * (dat$lat * pi/180) 
-  coords_sub <- cbind(x_km, y_km) 
-# IMPORTANT: build A for only the subset locations (rows will match nrow(dat)) 
-  A_obs_sub <- inla.spde.make.A(mesh, loc = coords_sub) 
-  # spatially varying slope design matrix for nearest_dist 
-  # (row-scale A by nearest_distc) 
-  stopifnot(requireNamespace("Matrix", quietly = TRUE)) 
-  A_obs_slope <- Matrix::Diagonal(n = nrow(A_obs_sub), x = dat$nearest_distc) %*% A_obs_sub 
+## functions to run INLA models with different formulas within the same framework 
+# function for Model 3a - WITHOUT spatial slope
+run_inla_strata_no_slope <- function(dat, mine_times, formula) {
   
-## two separate SPDE indices (same mesh/spde, different names) 
-  spde_idx0 <- inla.spde.make.index("spatial0", n.spde = spde$n.spde) 
-  spde_idx1 <- inla.spde.make.index("spatial_slope", n.spde = spde$n.spde) 
+  # Compute subset coords in same projection used to build mesh
+  lat0 <- mean(dat$lat, na.rm = TRUE) * pi/180
+  R <- 6371
+  x_km <- R * (dat$long * pi/180) * cos(lat0)
+  y_km <- R * (dat$lat * pi/180)
+  coords_sub <- cbind(x_km, y_km)
   
-# stack_obs: now has 3 A blocks: intercept/covariates + 2 spatial fields 
-  stack_obs <- inla.stack(data = list(y = dat$rdt), 
-                          A = list(A_obs_sub, A_obs_slope, 1), 
-                          effects = list( spatial0 = spde_idx0, 
-                                          spatial_slope = spde_idx1, data.frame(Intercept = 1, 
-                          nearest_dist = dat$nearest_distc, # fixed (global) slope still included 
-                          elevation = dat$elevationb, age = dat$agec, sex = dat$female, 
-                          mis_2017 = dat$mis_2017, dhs_2015 = dat$dhs_2015, 
-                          ais_2011 = dat$ais_2011, urban = dat$urban, 
-                          indust = dat$nearest_industc, wealth = dat$wealthc, 
-                          nearest_num_pits = dat$nearest_num_pits, 
-                          npitxprox = dat$npitxprox, num_mines_rho = dat$num_mines_rho, 
-                          nmines_rho_x_avg_pits = dat$nmines_rho_x_avg_pits, 
-                          avg_pits_x_prox = dat$avg_pits_x_prox)), tag = "obs") 
-## stack_pred: must mirror the SAME 3 A blocks, use the same centered/scaled nearest_dist variable as in training 
-## Make sure you have centered/scaled nearest distance for the grid 
-  pred_nearest_distc <- pred_grid_sf$nearest_distc  
-  A_pred_slope <- Matrix::Diagonal(n = nrow(A_pred), x = pred_nearest_distc) %*% A_pred 
+  # Build A for only the subset locations (rows will match nrow(dat))
+  A_obs_sub <- inla.spde.make.A(mesh, loc = coords_sub)
   
-  ## need to change!!
-  ## to wave-specific means for starting values
-  base_pred_covars <- data.frame(Intercept = rep(1, n_pred), 
-                                 nearest_dist = pred_nearest_distc, 
-                                 elevation = mean_elev, age = 0, 
-                                 sex = mean_fem, urban = mean_urban, 
-                                 indust = 0, wealth = 0, 
-                                 nearest_num_pits = mean_nnp, 
-                                 npitxprox = mean_npxp, num_mines_rho = mean_nmr, 
-                                 nmines_rho_x_avg_pits = mean_nmrxap, avg_pits_x_prox = mean_apxp) 
-
-  # Build one prediction stack PER survey stratum 
-  pred_stacks <- list() 
+  # ONE SPDE index (no spatial slope)
+  spde_idx0 <- inla.spde.make.index("spatial0", n.spde = spde$n.spde)
+  
+  # Stack_obs: 2 A blocks (spatial field + covariates, NO spatial slope)
+  stack_obs <- inla.stack(data = list(y = dat$rdt),
+    A = list(A_obs_sub, 1),
+    effects = list(spatial0 = spde_idx0,
+      data.frame(Intercept = 1,
+        nearest_dist = dat$nearest_distc,  #centered
+        elevation = dat$elevationb,
+        age = dat$agec,
+        sex = dat$female,
+        mis_2017 = dat$mis_2017,
+        dhs_2015 = dat$dhs_2015,
+        ais_2011 = dat$ais_2011,
+        urban = dat$urban,
+        indust = dat$nearest_industc,
+        wealth = dat$wealthc,
+        nearest_num_pits = dat$nearest_num_pits,
+        npitxprox = dat$npitxprox,
+        num_mines_rho = dat$num_mines_rho,
+        nmines_rho_x_avg_pits = dat$nmines_rho_x_avg_pits,
+        avg_pits_x_prox = dat$avg_pits_x_prox)), tag = "obs")
+  
+  # Base prediction covariates (set non-varying ones to NA)
+  base_pred_covars <- data.frame(Intercept = rep(1, n_pred), nearest_dist = pred_grid_sf$nearest_distc,  #centered
+    elevation = NA, age = NA, sex = NA, urban = NA, indust = NA, wealth = NA, nearest_num_pits = NA, 
+    npitxprox = NA, num_mines_rho = NA, nmines_rho_x_avg_pits = NA, avg_pits_x_prox = NA)
+  
+  # Build one prediction stack PER survey stratum
+  pred_stacks <- list()
   for (sname in names(survey_strata)) {
-    svals <- survey_strata[[sname]] 
-  pred_df <- base_pred_covars 
-  pred_df$mis_2017 <- svals["mis_2017"] 
-  pred_df$dhs_2015 <- svals["dhs_2015"] 
-  pred_df$ais_2011 <- svals["ais_2011"] 
-  pred_stacks[[sname]] <- inla.stack( data = list(y = NA), A = list(A_pred, A_pred_slope, 1), 
-                                      effects = list( spatial0 = 1:spde$n.spde, spatial_slope = 1:spde$n.spde, pred_df), 
-                                      tag = paste0("pred_", sname)) } 
-# Combine: obs + ALL pred stacks 
-  stack_full <- stack_obs 
-  for (sname in names(pred_stacks)) { stack_full <- inla.stack(stack_full, pred_stacks[[sname]]) } 
-
-# run models and output the following
-  results <- list() 
-  for (i in seq_along(formulas)) { 
-    fit <- inla(
-    formulas[[i]], data = inla.stack.data(stack_full), family = "binomial", control.family = list(link = "logit"), 
-    control.fixed = list(mean.intercept = 0, prec.intercept = 1e-4, mean = 0, prec = 1e-4), 
-    control.predictor = list(A = inla.stack.A(stack_full), compute = TRUE), 
-    control.compute = list(dic=TRUE, waic=TRUE, cpo=TRUE, config=TRUE)) 
+    svals <- survey_strata[[sname]]
+    pred_df <- base_pred_covars
+    pred_df$mis_2017 <- svals["mis_2017"]
+    pred_df$dhs_2015 <- svals["dhs_2015"]
+    pred_df$ais_2011 <- svals["ais_2011"]
   
-  for (sname in names(survey_strata)) { 
-    idx_pred <- inla.stack.index(stack_full, paste0("pred_", sname))$data 
-    pred_mean <- fit$summary.fitted.values[idx_pred, "mean"] 
-    pred_sd <- fit$summary.fitted.values[idx_pred, "sd"] 
-    # store on the grid with informative names 
-    pred_grid_sf[[paste0("pred", i, "_", sname, "_eta")]] <- pred_mean 
-    pred_grid_sf[[paste0("pred", i, "_", sname, "_sd")]] <- pred_sd 
-    pred_grid_sf[[paste0("pred", i, "_", sname, "_prob")]] <- plogis(pred_mean) 
-    pred_grid_sf[[paste0("pred", i, "_", sname, "_lower")]] <- plogis(pred_mean - 1.96 * pred_sd) 
-    pred_grid_sf[[paste0("pred", i, "_", sname, "_upper")]] <- plogis(pred_mean + 1.96 * pred_sd) 
-  } 
-    results[[paste0("model_", i)]] <- fit } 
-   
-  return(list(models = results, predictions = pred_grid_sf)) 
+    pred_stacks[[sname]] <- inla.stack( data = list(y = NA), A = list(A_pred, 1),  # 2 A blocks (no slope)
+      effects = list(spatial0 = 1:spde$n.spde,
+        pred_df), tag = paste0("pred_", sname))
   }
+  # Combine: obs + ALL pred stacks
+  stack_full <- stack_obs
+  for (sname in names(pred_stacks)) {
+    stack_full <- inla.stack(stack_full, pred_stacks[[sname]])
+  }
+  # Fit model
+  cat("Running model 3a (no spatial slope)...\n")
+  fit <- inla(formula, data = inla.stack.data(stack_full),
+    family = "binomial", control.family = list(link = "logit"),
+    control.fixed = list(mean.intercept = 0, prec.intercept = 1e-4, mean = 0, prec = 1e-4),
+    control.predictor = list(A = inla.stack.A(stack_full),compute = TRUE),
+    control.compute = list(dic = TRUE, waic = TRUE, cpo = TRUE, config = TRUE))
+  
+  # Extract predictions for each stratum
+  for (sname in names(survey_strata)) {
+    idx_pred <- inla.stack.index(stack_full, paste0("pred_", sname))$data
+    pred_mean <- fit$summary.fitted.values[idx_pred, "mean"]
+    pred_sd <- fit$summary.fitted.values[idx_pred, "sd"]
+    # Store on the grid with informative names
+    pred_grid_sf[[paste0("pred3a_", sname, "_eta")]] <- pred_mean
+    pred_grid_sf[[paste0("pred3a_", sname, "_sd")]] <- pred_sd
+    pred_grid_sf[[paste0("pred3a_", sname, "_prob")]] <- plogis(pred_mean)
+    pred_grid_sf[[paste0("pred3a_", sname, "_lower")]] <- plogis(pred_mean - 1.96 * pred_sd)
+    pred_grid_sf[[paste0("pred3a_", sname, "_upper")]] <- plogis(pred_mean + 1.96 * pred_sd)
+  }
+  return(list(model = fit, predictions = pred_grid_sf))
+}
+
+
+## Function for Model 3b - WITH spatial slope
+run_inla_strata_with_slope <- function(dat, mine_times, formula) {
+  
+  # Compute subset coords in same projection used to build mesh
+  lat0 <- mean(dat$lat, na.rm = TRUE) * pi/180
+  R <- 6371
+  x_km <- R * (dat$long * pi/180) * cos(lat0)
+  y_km <- R * (dat$lat * pi/180)
+  coords_sub <- cbind(x_km, y_km)
+  
+  # Build A for only the subset locations (rows will match nrow(dat))
+  A_obs_sub <- inla.spde.make.A(mesh, loc = coords_sub)
+  
+  # Spatially varying slope design matrix for nearest_dist
+  stopifnot(requireNamespace("Matrix", quietly = TRUE))
+  A_obs_slope <- Matrix::Diagonal(n = nrow(A_obs_sub), x = dat$nearest_distc) %*% A_obs_sub  # centered nearest distance
+  
+  # TWO separate SPDE indices (same mesh/spde, different names)
+  spde_idx0 <- inla.spde.make.index("spatial0", n.spde = spde$n.spde)
+  spde_idx1 <- inla.spde.make.index("spatial_slope", n.spde = spde$n.spde)
+  
+  # Stack_obs: 3 A blocks (intercept/covariates + 2 spatial fields)
+  stack_obs <- inla.stack(data = list(y = dat$rdt),
+    A = list(A_obs_sub, A_obs_slope, 1), effects = list(spatial0 = spde_idx0,
+      spatial_slope = spde_idx1, data.frame(Intercept = 1,
+        nearest_dist = dat$nearest_distc,  # centered
+        elevation = dat$elevationb,
+        age = dat$agec,
+        sex = dat$female,
+        mis_2017 = dat$mis_2017,
+        dhs_2015 = dat$dhs_2015,
+        ais_2011 = dat$ais_2011,
+        urban = dat$urban,
+        indust = dat$nearest_industc,
+        wealth = dat$wealthc,
+        nearest_num_pits = dat$nearest_num_pits,
+        npitxprox = dat$npitxprox,
+        num_mines_rho = dat$num_mines_rho,
+        nmines_rho_x_avg_pits = dat$nmines_rho_x_avg_pits,
+        avg_pits_x_prox = dat$avg_pits_x_prox)), tag = "obs")
+  
+  # Prediction A_slope matrix
+  A_pred_slope <- Matrix::Diagonal(n = nrow(A_pred), x = pred_grid_sf$nearest_distc) %*% A_pred   # centered nearest distance
+  
+  # Base prediction covariates
+  base_pred_covars <- data.frame(Intercept = rep(1, n_pred),
+    nearest_dist = pred_grid_sf$nearest_distc,  # centered
+    elevation = NA, age = NA, sex = NA, urban = NA, indust = NA, wealth = NA, nearest_num_pits = NA,
+    npitxprox = NA, num_mines_rho = NA, nmines_rho_x_avg_pits = NA, avg_pits_x_prox = NA)
+  
+  # Build one prediction stack PER survey stratum
+  pred_stacks <- list()
+  for (sname in names(survey_strata)) {
+    svals <- survey_strata[[sname]]
+    pred_df <- base_pred_covars
+    pred_df$mis_2017 <- svals["mis_2017"]
+    pred_df$dhs_2015 <- svals["dhs_2015"]
+    pred_df$ais_2011 <- svals["ais_2011"]
+    
+    pred_stacks[[sname]] <- inla.stack(data = list(y = NA), A = list(A_pred, A_pred_slope, 1),  # 3 A blocks (with slope)
+      effects = list(spatial0 = 1:spde$n.spde, spatial_slope = 1:spde$n.spde, pred_df), tag = paste0("pred_", sname))
+  }
+  
+  # Combine: obs + ALL pred stacks
+  stack_full <- stack_obs
+  for (sname in names(pred_stacks)) {
+    stack_full <- inla.stack(stack_full, pred_stacks[[sname]])
+  }
+  
+  # Fit model
+  cat("Running model 3b (with spatial slope)...\n")
+  fit <- inla(formula, data = inla.stack.data(stack_full), family = "binomial",
+    control.family = list(link = "logit"),
+    control.fixed = list(mean.intercept = 0, prec.intercept = 1e-4, mean = 0, prec = 1e-4),
+    control.predictor = list(A = inla.stack.A(stack_full), compute = TRUE),
+    control.compute = list(dic = TRUE, waic = TRUE, cpo = TRUE, config = TRUE))
+  
+  # Extract predictions for each stratum
+  for (sname in names(survey_strata)) {
+    idx_pred <- inla.stack.index(stack_full, paste0("pred_", sname))$data
+    pred_mean <- fit$summary.fitted.values[idx_pred, "mean"]
+    pred_sd <- fit$summary.fitted.values[idx_pred, "sd"]
+    
+    # Store on the grid with informative names
+    pred_grid_sf[[paste0("pred3b_", sname, "_eta")]] <- pred_mean
+    pred_grid_sf[[paste0("pred3b_", sname, "_sd")]] <- pred_sd
+    pred_grid_sf[[paste0("pred3b_", sname, "_prob")]] <- plogis(pred_mean)
+    pred_grid_sf[[paste0("pred3b_", sname, "_lower")]] <- plogis(pred_mean - 1.96 * pred_sd)
+    pred_grid_sf[[paste0("pred3b_", sname, "_upper")]] <- plogis(pred_mean + 1.96 * pred_sd)
+  }
+  
+  return(list(model = fit, predictions = pred_grid_sf))
+}
+
+
+formula3a <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +
+  mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde)
+formula3b <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +
+  mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde) +
+  f(spatial_slope, model = spde)
+
+## Run both models
+out_3a <- run_inla_strata_no_slope(nw_rdt, mine_times, formula3a)
+out_3b <- run_inla_strata_with_slope(nw_rdt, mine_times, formula3b)
+
+# Store predictions
+pred_grid_strata <- out_3a$predictions
+# Add the 3b columns (drop geometry from 3b to avoid duplicate geometry columns)
+pred_3b_cols <- out_3b$predictions %>% st_drop_geometry()
+pred_grid_strata <- bind_cols(pred_grid_strata, pred_3b_cols)
 
 
 ## overall results model function
@@ -640,7 +754,7 @@ run_inla_strata <- function(dat, mine_times, formulas) {
 A_obs_sub <- inla.spde.make.A(mesh, loc = coords) 
 
 # separate As for observations and spatial slope?
-A_obs_slope <- Matrix::Diagonal(n = nrow(A_obs_sub), x = dat$nearest_distc) %*% A_obs_sub 
+A_obs_slope <- Matrix::Diagonal(n = nrow(A_obs_sub), x = dat$nearest_distc) %*% A_obs_sub   # centered nearest distance 
 
 ## 2) two separate SPDE indices (same mesh/spde, different names) 
 spde_idx0 <- inla.spde.make.index("spatial0", n.spde = spde$n.spde) 
@@ -651,7 +765,7 @@ stack_obs <- inla.stack(data = list(y = dat$rdt),
                         A = list(A_obs_sub, A_obs_slope, 1), 
                         effects = list( spatial0 = spde_idx0, 
                                         spatial_slope = spde_idx1, data.frame(Intercept = 1, 
-                                        nearest_dist = dat$nearest_distc, # fixed (global) slope still included 
+                                        nearest_dist = dat$nearest_distc, # centered
                                         elevation = dat$elevationb, age = dat$agec, sex = dat$female, 
                                         mis_2017 = dat$mis_2017, dhs_2015 = dat$dhs_2015, 
                                         ais_2011 = dat$ais_2011, urban = dat$urban, 
@@ -664,32 +778,19 @@ stack_obs <- inla.stack(data = list(y = dat$rdt),
 ## 4) stack_pred: must mirror the SAME 3 A blocks 
 # IMPORTANT: use the same centered/scaled nearest_dist variable as in training 
 # Make sure you have centered/scaled nearest distance for the grid 
-  pred_nearest_distc <- pred_grid_sf$nearest_distc # <-- use centered version 
-  A_pred_slope <- Matrix::Diagonal(n = nrow(A_pred), x = pred_nearest_distc) %*% A_pred 
+  pred_nearest_dist <- pred_grid_sf$nearest_distc # centered 
+  A_pred_slope <- Matrix::Diagonal(n = nrow(A_pred), x = pred_nearest_dist) %*% A_pred 
 
 # 5) Prediction grid is already made 
 # Compute nearest mine distance & prediction coords, already done
 
 # 6) prediction stack overall
-  stack_pred <- inla.stack(data = list(y = NA), 
-    A = list(A_pred, A_pred_slope, 1), effects = list(
-      spatial0 = spde_idx0, spatial_slope = spde_idx1, 
-      data.frame(Intercept = rep(1, n_pred),           # n_pred rows
-        nearest_dist = pred_nearest_distc,    # prediction grid values
-        elevation = rep(mean_elev, n_pred),   # use means for prediction
-        age = rep(0, n_pred),                 # centered, so 0 = mean
-        sex = rep(mean_fem, n_pred), 
-        mis_2017 = rep(mean(dat$mis_2017), n_pred),  # or 0 if you want reference
-        dhs_2015 = rep(mean(dat$dhs_2015), n_pred),
-        ais_2011 = rep(mean(dat$ais_2011), n_pred),
-        urban = rep(mean_urban, n_pred), 
-        indust = rep(0, n_pred),              # centered, so 0 = mean
-        wealth = rep(0, n_pred),              # centered, so 0 = mean
-        nearest_num_pits = rep(mean_nnp, n_pred), 
-        npitxprox = rep(mean_npxp, n_pred), 
-        num_mines_rho = rep(mean_nmr, n_pred), 
-        nmines_rho_x_avg_pits = rep(mean_nmrxap, n_pred), 
-        avg_pits_x_prox = rep(mean_apxp, n_pred))), tag = "pred")
+  stack_pred <- inla.stack(data = list(y = NA), A = list(A_pred, A_pred_slope, 1), effects = list(
+                spatial0 = spde_idx0, spatial_slope = spde_idx1, data.frame(Intercept = rep(1, n_pred), # n_pred rows
+                nearest_dist = pred_nearest_dist,    # prediction grid values
+        elevation = NA, age = NA, sex = NA, mis_2017 = NA,  dhs_2015 = NA, ais_2011 = NA, 
+        urban = NA, indust = NA, wealth = NA, nearest_num_pits = NA, npitxprox = NA, num_mines_rho = NA, 
+        nmines_rho_x_avg_pits = NA, avg_pits_x_prox = NA)), tag = "pred")
 
 # Combine observed + prediction stacks
 stack_full <- inla.stack(stack_obs, stack_pred)
@@ -700,8 +801,7 @@ run_inla_overall <- function(dat, mine_times, formulas, grid_extent = c(29.4, 35
   results <- list()
   for (i in seq_along(formulas)) {
     cat("Running model", i, "...\n")
-    fit <- inla(formulas[[i]], 
-                data = inla.stack.data(stack_full),
+    fit <- inla(formulas[[i]], data = inla.stack.data(stack_full),
                 family = "binomial", control.family = list(link = "logit"),
                 control.fixed = list(mean.intercept = 0, prec.intercept = 1e-4, mean = 0, prec = 1e-4),
                 control.predictor = list(A = inla.stack.A(stack_full), compute = TRUE),
@@ -716,59 +816,106 @@ run_inla_overall <- function(dat, mine_times, formulas, grid_extent = c(29.4, 35
   return(list(models = results, predictions = pred_grid_sf))
 }
 
-
 #Define formulas (use the same naming as before, spde object will be built inside the function)
-formulas <- list(
+#formulas <- list(
                 #formula1 <- y ~ 0 + Intercept + nearest_dist + f(spatial, model = spde),
                 #formula2 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + 
                 #          mis_2017 + dhs_2015 + ais_2011 + urban + wealth,
-  formula3a <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +
-    mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde),
-  formula3b <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +
-    mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde) +
-    f(spatial_slope, model = spde))#,
+#  formula3a <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +
+#    mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde),
                 #formula4 <- y ~ 0 + Intercept + nearest_dist + indust + f(spatial, model = spde), 
                 #formula5 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +  
                 #         mis_2017 + dhs_2015 + ais_2011 + urban + wealth + indust + 
                 #         f(spatial, model = spde))
 
-## run and attach stratified predictions to the grid shapefile
-out_strata <- run_inla_strata(nw_rdt, mine_times, formulas)
-pred_grid_strata <- out_strata$predictions
-
 ## run and export overall results (un-stratified)
-out_all <- run_inla_overall(nw_rdt, mine_times, formulas)
+#out_all <- run_inla_overall(nw_rdt, mine_times, formulas)
 ## model predictions 
-pred_grid_sf$model3a_prob <-   out_all$predictions$pred1_prob
-pred_grid_sf$model3a_sd <-     out_all$predictions$pred1_sd
-pred_grid_sf$model3a_lower <-  out_all$predictions$pred1_lower
-pred_grid_sf$model3a_upper <-  out_all$predictions$pred1_upper
+#pred_grid_sf$model3a_prob <-   out_all$predictions$pred1_prob
+#pred_grid_sf$model3a_sd <-     out_all$predictions$pred1_sd
+#pred_grid_sf$model3a_lower <-  out_all$predictions$pred1_lower
+#pred_grid_sf$model3a_upper <-  out_all$predictions$pred1_upper
 
-pred_grid_sf$model3b_prob <-  out_all$predictions$pred2_prob
-pred_grid_sf$model3b_sd <-    out_all$predictions$pred2_sd
-pred_grid_sf$model3b_lower <- out_all$predictions$pred2_lower
-pred_grid_sf$model3b_upper <- out_all$predictions$pred2_upper
+#pred_grid_sf$model3b_prob <-  out_all$predictions$pred2_prob
+#pred_grid_sf$model3b_sd <-    out_all$predictions$pred2_sd
+#pred_grid_sf$model3b_lower <- out_all$predictions$pred2_lower
+#pred_grid_sf$model3b_upper <- out_all$predictions$pred2_upper
 
 
+## export stratified results
 # Write separate GeoPackages (or shapefiles) per stratum of survey wave
 tmp_list <- list()
 
 for (sname in names(survey_strata)) {
-  layer_cols <- c("geometry",
-                  paste0("pred1_", sname, "_prob"),
-                  paste0("pred1_", sname, "_lower"),
-                  paste0("pred1_", sname, "_upper"))
-  
+  layer_cols <- c("geometry", paste0("pred3a_", sname, "_prob"), paste0("pred3a_", sname, "_lower"), paste0("pred3a_", sname, "_upper"),
+                  paste0("pred3b_", sname, "_prob"), paste0("pred3b_", sname, "_lower"), paste0("pred3b_", sname, "_upper"))
   tmp_list[[sname]] <- pred_grid_strata[, layer_cols]
-  
-  st_write(tmp_list[[sname]],
-           dsn = paste0("pred_surface_", sname, ".gpkg"),
-           layer = "pred",
-           delete_dsn = TRUE)
+  st_write(tmp_list[[sname]], dsn = paste0("pred_surface_", sname, ".gpkg"), layer = "pred", delete_dsn = TRUE)
 }
 
-## model data at each cluster point ?
+## model data at each cluster point 
+# Get cluster-level observed prevalence
+#cluster_validation <- nw_rdt %>% group_by(lat, long, mis_2017, dhs_2015, ais_2011) %>%
+#  summarise(n_obs = n(), obs_prev = mean(rdt, na.rm = TRUE), .groups = "drop") %>%
+#  mutate(survey = case_when(mis_2017 == 1 ~ "mis_2017", dhs_2015 == 1 ~ "dhs_2015", ais_2011 == 1 ~ "ais_2011", TRUE ~ "ref_2022"))
 
+# Convert to sf
+#cluster_validation_sf <- st_as_sf(cluster_validation, coords = c("long", "lat"), crs = 4326)
+
+# Initialize prediction columns
+#cluster_validation_sf$pred3a_prob <- NA_real_
+#cluster_validation_sf$pred3a_lower <- NA_real_
+#cluster_validation_sf$pred3a_upper <- NA_real_
+#cluster_validation_sf$pred3b_prob <- NA_real_
+#cluster_validation_sf$pred3b_lower <- NA_real_
+#cluster_validation_sf$pred3b_upper <- NA_real_
+
+# First, make sure pred_grid_strata has the same CRS as cluster_validation_sf
+#pred_grid_strata <- st_transform(pred_grid_strata, st_crs(cluster_validation_sf))
+
+#for (sname in c("ref_2022", "mis_2017", "dhs_2015", "ais_2011")) {
+#  rows_to_update <- which(cluster_validation_sf$survey == sname)
+#  
+#  if (length(rows_to_update) > 0) {
+#    clust_subset <- cluster_validation_sf[rows_to_update, ]
+#    nearest_idx <- st_nearest_feature(clust_subset, pred_grid_strata)
+#    # Model 3a
+#    cluster_validation_sf$pred3a_prob[rows_to_update] <- 
+#      pred_grid_strata[[paste0("pred3a_", sname, "_prob")]][nearest_idx]
+#    cluster_validation_sf$pred3a_lower[rows_to_update] <- 
+#      pred_grid_strata[[paste0("pred3a_", sname, "_lower")]][nearest_idx]
+#    cluster_validation_sf$pred3a_upper[rows_to_update] <- 
+#      pred_grid_strata[[paste0("pred3a_", sname, "_upper")]][nearest_idx]
+#    # Model 3b
+#    cluster_validation_sf$pred3b_prob[rows_to_update] <- 
+#      pred_grid_strata[[paste0("pred3b_", sname, "_prob")]][nearest_idx]
+#    cluster_validation_sf$pred3b_lower[rows_to_update] <- 
+#      pred_grid_strata[[paste0("pred3b_", sname, "_lower")]][nearest_idx]
+#    cluster_validation_sf$pred3b_upper[rows_to_update] <- 
+#      pred_grid_strata[[paste0("pred3b_", sname, "_upper")]][nearest_idx]
+#  }
+#}
+
+# Validation plots
+#cluster_val_df <- cluster_validation_sf %>% st_drop_geometry()
+
+# Model 3a
+#p1 <- ggplot(cluster_val_df, aes(x = pred3a_prob, y = obs_prev)) + geom_point(aes(color = survey, size = n_obs), alpha = 0.6) +
+#  geom_abline(slope = 1, intercept = 0, linetype = "dashed") + facet_wrap(~survey) + labs(x = "Predicted prevalence (Model 3a)", 
+#       y = "Observed prevalence", title = "Model 3a: No spatial slope") + theme_bw()
+# Model 3b
+#p2 <- ggplot(cluster_val_df, aes(x = pred3b_prob, y = obs_prev)) + geom_point(aes(color = survey, size = n_obs), alpha = 0.6) +
+#  geom_abline(slope = 1, intercept = 0, linetype = "dashed") + facet_wrap(~survey) + labs(x = "Predicted prevalence (Model 3b)", 
+#       y = "Observed prevalence", title = "Model 3b: With spatial slope") + theme_bw()
+#p1 / p2
+
+# Calculate validation metrics
+#cluster_val_df %>% group_by(survey) %>% summarise(mae_3a = mean(abs(obs_prev - pred3a_prob)),
+#    rmse_3a = sqrt(mean((obs_prev - pred3a_prob)^2)),
+#    cor_3a = cor(obs_prev, pred3a_prob),
+#    mae_3b = mean(abs(obs_prev - pred3b_prob)),
+#    rmse_3b = sqrt(mean((obs_prev - pred3b_prob)^2)),
+#    cor_3b = cor(obs_prev, pred3b_prob))
 
 # stratified model 3 (less and more pits on average at mines within rho)
 nw_lpits <- nw_rdt %>% filter(avg_pits_rho <= 1.5)
@@ -793,35 +940,8 @@ nw_mpits <- nw_rdt %>% filter(avg_pits_rho > 1.5)
 
 ## EMM assessed using models with interaction terms 
 ## formulas based on model 3 (a or b??) from above
-
-
 ## model 3 (a or b?) within strata of number of pits at nearest mine and average number of pits within rho 
-# Function to run model within strata and extract beta1 + CI
-extract_strata_results <- function(data, strat_var, strata_bounds, strata_labels, mine_times, formulas) {
-  
-  # make strata
-  strata_data <- map2(strata_bounds, strata_labels, function(b, label) {
-    if (length(b) == 1) { # exact zero case
-      df <- data %>% filter(!!sym(strat_var) == b)
-    } else {              # range case
-      df <- data %>% filter(!!sym(strat_var) > b[1], !!sym(strat_var) <= b[2])
-    }
-    list(label = label, dat = df)
-  })
-  
-  # run INLA + extract beta1
-  results <- map_dfr(strata_data, function(s) {
-    out <- run_inla_models(s$dat, mine_times, formulas)
-    params <- exp(out$models$model_1$summary.fixed)
-    tibble(stratum = s$label,
-      var = rownames(params),
-      beta = params["nearest_dist", "mean"],
-      lcl = params["nearest_dist", "0.025quant"],
-      ucl = params["nearest_dist", "0.975quant"])
-  })
-  return(results)
-}
-
+## function to run model within strata and extract beta1 + CI
 remove(rwa, bur, africa, uga, mines_missing, complete1, mine_times_imp1, mines_imp)
 
 
@@ -850,10 +970,8 @@ district_valid <- st_make_valid(district)
 tanzania_boundary <- st_union(district_valid)
 # Re-project prediction grid to match boundary CRS (or vice versa)
 pred_grid_sf <- st_transform(pred_grid_sf, st_crs(tanzania_boundary))
-pred_strata_sf <- st_transform(pred_grid_strata, st_crs(tanzania_boundary))
 # Clip the prediction grid to the Tanzania boundary
 pred_grid_sf <- pred_grid_sf[st_within(st_centroid(pred_grid_sf), tanzania_boundary, sparse = FALSE), ]
-pred_strata_sf <- pred_strata_sf[st_within(st_centroid(pred_strata_sf), tanzania_boundary, sparse = FALSE), ]
 
 ## then clip effects (within TZ boundary) to a convex polygon using cluster locations
 #pull both cluster and mine coordinates into one list
@@ -867,6 +985,10 @@ convex_poly <- cluster_sf %>% summarise() %>% st_convex_hull()
 convex_poly <- st_transform(convex_poly, 4210)
 convex_poly_buff <- st_buffer(convex_poly, dist = 0.075)  # buffer in degrees; adjust as needed
 pred_overall_clipped <- st_intersection(pred_grid_sf, convex_poly_buff)
+
+## same thing for the stratified predictions grid
+pred_strata_sf <- st_transform(pred_grid_strata, st_crs(tanzania_boundary))
+pred_strata_sf <- pred_strata_sf[st_within(st_centroid(pred_strata_sf), tanzania_boundary, sparse = FALSE), ]
 pred_strata_clipped <- st_intersection(pred_strata_sf, convex_poly_buff)
 
 
@@ -905,34 +1027,34 @@ plot_pred_surface <- function(pred_grid, survey,
 
 
 ## overall/combined plot across all survey waves
-pred_3a <- ggplot() + geom_sf(data = bounds, fill = "grey90") + geom_sf_text(data = bounds,
-           aes(label = NAME_0),color = "grey35",size = 3, fontface = "italic") +
-  geom_sf(data = pred_overall_clipped, aes(color = model3a_prob)) +
-  scale_color_viridis_c(option = "viridis", name = "Predicted prevalence", direction = -1, alpha = 0.7) +
-  ggnewscale::new_scale("color") +
-  geom_sf(data = mine_times_sf, aes(shape = size, color = size), size = 2, alpha = 0.7) +
-  scale_shape_manual(values = c("artisanal" = 17, "industrial" = 15), name = "Mine type") +
-  scale_color_manual(values = c("artisanal" = "plum1", "industrial" = "darkorchid4"), name = "Mine type") +
-  geom_point(data = nw_cluster, aes(x = long, y = lat), color = "grey95",shape = 21, size = 1.5) +
-  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) +
-  annotation_scale(location = "br", width_hint = 0.3, text_cex = 0.7) +
-  theme(legend.title = element_text(size = 12), legend.text  = element_text(size = 12),
-        axis.text   = element_blank(), axis.ticks  = element_blank(),
-        panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
-  labs(x = "", y = "") + ggtitle("Predicted RDT positivity prevalence: Model 3a")
+#pred_3a <- ggplot() + geom_sf(data = bounds, fill = "grey90") + geom_sf_text(data = bounds,
+#           aes(label = NAME_0),color = "grey35",size = 3, fontface = "italic") +
+#  geom_sf(data = pred_overall_clipped, aes(color = model3a_prob)) +
+#  scale_color_viridis_c(option = "viridis", name = "Predicted prevalence", direction = -1, alpha = 0.7) +
+#  ggnewscale::new_scale("color") +
+#  geom_sf(data = mine_times_sf, aes(shape = size, color = size), size = 2, alpha = 0.7) +
+#  scale_shape_manual(values = c("artisanal" = 17, "industrial" = 15), name = "Mine type") +
+#  scale_color_manual(values = c("artisanal" = "plum1", "industrial" = "darkorchid4"), name = "Mine type") +
+#  geom_point(data = nw_cluster, aes(x = long, y = lat), color = "grey95",shape = 21, size = 1.5) +
+#  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) +
+#  annotation_scale(location = "br", width_hint = 0.3, text_cex = 0.7) +
+#  theme(legend.title = element_text(size = 12), legend.text  = element_text(size = 12),
+#        axis.text   = element_blank(), axis.ticks  = element_blank(),
+#        panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+#  labs(x = "", y = "") + ggtitle("Predicted RDT positivity prevalence: Model 3a")
 #pred_3a
 #pred_3b
 
 ## stratified predictions within individual survey waves
-p3a_dhs22 <- plot_pred_surface(pred_strata_clipped, "ref_2022", 1, bounds, mine_times_22, nw_cluster, "DHS 2022")
-p3a_mis17 <- plot_pred_surface(pred_strata_clipped, "mis_2017", 1, bounds, mine_times_17, nw_cluster, "MIS 2017")
-p3a_dhs15 <- plot_pred_surface(pred_strata_clipped, "dhs_2015", 1, bounds, mine_times_15, nw_cluster, "DHS 2015-16")
-p3a_ais11 <- plot_pred_surface(pred_strata_clipped, "ais_2011", 1, bounds, mine_times_11, nw_cluster, "AIS 2011-12")
+p3a_dhs22 <- plot_pred_surface(pred_strata_clipped, "ref_2022", "3a", bounds, mine_times_22, nw_cluster, "DHS 2022")
+p3a_mis17 <- plot_pred_surface(pred_strata_clipped, "mis_2017", "3a", bounds, mine_times_17, nw_cluster, "MIS 2017")
+p3a_dhs15 <- plot_pred_surface(pred_strata_clipped, "dhs_2015", "3a", bounds, mine_times_15, nw_cluster, "DHS 2015-16")
+p3a_ais11 <- plot_pred_surface(pred_strata_clipped, "ais_2011", "3a", bounds, mine_times_11, nw_cluster, "AIS 2011-12")
 
-p3b_dhs22 <- plot_pred_surface(pred_strata_clipped, "ref_2022", 2, bounds, mine_times_22, nw_cluster, "DHS 2022")
-p3b_mis17 <- plot_pred_surface(pred_strata_clipped, "mis_2017", 2, bounds, mine_times_17, nw_cluster, "MIS 2017")
-p3b_dhs15 <- plot_pred_surface(pred_strata_clipped, "dhs_2015", 2, bounds, mine_times_15, nw_cluster, "DHS 2015-15")
-p3b_ais11 <- plot_pred_surface(pred_strata_clipped, "ais_2011", 2, bounds, mine_times_11, nw_cluster, "AIS 2011-12")
+p3b_dhs22 <- plot_pred_surface(pred_strata_clipped, "ref_2022", "3b", bounds, mine_times_22, nw_cluster, "DHS 2022")
+p3b_mis17 <- plot_pred_surface(pred_strata_clipped, "mis_2017", "3b", bounds, mine_times_17, nw_cluster, "MIS 2017")
+p3b_dhs15 <- plot_pred_surface(pred_strata_clipped, "dhs_2015", "3b", bounds, mine_times_15, nw_cluster, "DHS 2015-15")
+p3b_ais11 <- plot_pred_surface(pred_strata_clipped, "ais_2011", "3b", bounds, mine_times_11, nw_cluster, "AIS 2011-12")
 
 #model 3a (no spatial slope for proximity)
 model3a_svys <- (p3a_dhs22 | p3a_mis17) / (p3a_dhs15 | p3a_ais11)
@@ -943,3 +1065,7 @@ model3b_svys <- (p3b_dhs22 | p3b_mis17) / (p3b_dhs15 | p3b_ais11)
 #model3b_svys
 
 #ggsave("C:/Users/cgait/OneDrive/Desktop/model3_allsvys.jpeg", width=20, height=15, units=c("cm"), model3_svys)
+
+##view range parameters?
+range_3a <- out_3a$model$summary.hyperpar$mean
+range_3b <- out_3b$model$summary.hyperpar$mean
