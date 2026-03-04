@@ -1,7 +1,10 @@
 ## Malaria in TZ national surveys from 2011-2022, predicted by proximity to artisanal and industrial mines----
 
 ## part one: data extract and organization----
-#load packages
+
+#functions
+source("mine_functions.R")
+#packages
 library(broom)
 library(broom.mixed)
 library(dplyr)
@@ -32,6 +35,7 @@ library(tibble)
 library(tidyverse)
 library(viridis)
 library(writexl)
+
 
 #DHS 2022 household member recode
 TZ22_pr <- read_sas("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/TZ_DHS22/TZPR82SD/TZPR82FL.SAS7BDAT")
@@ -199,7 +203,7 @@ remove(TZ22_pr, TZ17_pr, TZ15_pr, TZ11_pr, rain, rain22, rain17, rain15, rain16,
 
 
 
-#part two: create mine exposure data over time ----
+## part two: create mine exposure data over time ----
 
 #add indicators for survey years and months
 tz_dhs22$svy <- "dhs_2022"
@@ -262,61 +266,10 @@ complete1 <- complete(mines_imp, 1)
 # completed dataset for all imputations stacked together
 all_complete <- complete(mines_imp, "long")  # adds a .imp column
 
-#hist(mine_times$num_pits)
-#densityplot(mines_imp, ~ num_pits)
 mine_times_imp1 <- complete(mines_imp, 1)   # dataset with imputed values filled
 mine_times$num_pits_imp1 <- mine_times_imp1$num_pits
 
-
-#function to calculate proximity measures for each cluster based on mines active each year
-calculate_proximity <- function(year, mine_data, cluster_coords) {
-  # Filter active mines for the given year
-  mines <- mine_data %>% filter(year_open <= year & year_close > year)
-  big_mines <- mines %>% filter(size == "industrial")
-  
-  # Pull coordinates for mines
-  mine_coords <- mines[, c("lat", "long")]
-  big_mine_coords <- big_mines[, c("lat", "long")]
-  
-  # Pull cluster coordinates and ensure HV001 is retained
-  cluster_coords <- cluster_coords %>% dplyr::select(HV001, lat, long)
-  
-  # Calculate distances
-  distances <- apply(cluster_coords[, c("lat", "long")], 1, function(point) distHaversine(point, mine_coords))
-  big_distances <- apply(cluster_coords[, c("lat", "long")], 1, function(point) distHaversine(point, big_mine_coords))
-  
-  # Count mines within 21.08 km
-  mines_within_rho <- apply(distances, 2, function(d) sum(d < 21080))
-  big_mines_within_rho <- apply(big_distances, 2, function(d) sum(d < 21080))
-  
-  # Find nearest distances
-  nearest_distances <- apply(distances, 2, min) / 1000 # km
-  nearest_big_distances <- apply(big_distances, 2, min) / 1000 # km
-  
-  # Find nearest mine indices and get num_pits
-  nearest_indices <- apply(distances, 2, which.min)
-  nearest_num_pits <- mines$num_pits_imp1[nearest_indices]
-  
-  # Average num_pits within 21 km (estimated rho using Model 3)
-  avg_pits_rho <- apply(distances, 2, function(d) {
-    pits <- mines$num_pits_imp1[d < 21080]
-    if (length(pits) > 0) mean(pits, na.rm = TRUE) else 0})
-  
-  # Add proximity calculations to cluster data
-  cluster_data <- cluster_coords %>% mutate(
-      !!paste0("num_mines_rho", year) := mines_within_rho,
-      !!paste0("total_distances", year) := apply(distances, 2, sum) / 1000,
-      !!paste0("mean_distances", year) := apply(distances, 2, mean) / 1000,
-      !!paste0("num_bmines_rho", year) := big_mines_within_rho,
-      !!paste0("nearest_dist", year) := nearest_distances,
-      !!paste0("big_dist", year) := nearest_big_distances,
-      !!paste0("close_mine", year) := if_else(nearest_distances <= 15, 1, 0),
-      !!paste0("close_big", year) := if_else(nearest_big_distances <= 15, 1, 0),
-      !!paste0("nearest_num_pits", year) := nearest_num_pits,
-      !!paste0("avg_pits_rho", year) := avg_pits_rho)
-  
-  return(cluster_data)
-}
+##calculate_proximity function 
 
 #specify years to run proximity calculations
 survey_years <- c(2011, 2012, 2015, 2016, 2017, 2022)
@@ -448,8 +401,6 @@ nw_rdt$avg_pits_x_prox <- nw_rdt$avg_pits_rho*nw_rdt$nearest_dist
 
 remove(rwa, bur, africa, uga, tza, mines_missing, complete1, mine_times_imp1, mines_imp)
 
-table(mine_times$mineral, useNA = "always")
-84/447
 
 
 ## part three: risk factor analysis ----
@@ -469,8 +420,7 @@ DHS<-svydesign(id=nw_rdt$HV021, strata=nw_rdt$HV023, weights=nw_rdt$wt, data=nw_
 #clusters with only one participant (lonely psu)
 options(survey.lonely.psu="adjust")
 
-rdt_svy<- function(var) {m <- svyglm(as.formula(paste0('rdt ~', var)), DHS, family=quasibinomial("identity"))
-cbind(tidy(m), confint(m))}
+## rdt_svy function
 
 #variables for glms
 studyvars <-c("female","age","close_big","close_mine","HV270","urban","livestock","pits_2level","water_cat","elevationb")
@@ -585,25 +535,7 @@ stack_obs <- inla.stack(data = list(y = dat$rdt),
 # 10) Combine observed + prediction stacks
 stack_full <- inla.stack(stack_obs, stack_pred)
 
-#function to run INLA models with different formulas within the same framework
-run_inla_overall <- function(dat, mine_times, formulas, grid_extent = c(29.4, 35, -5.5, -0.5)) {
-  
-  results <- list()
-  for (i in seq_along(formulas)) {
-    cat("Running model", i, "...\n")
-    fit <- inla(formulas[[i]], data = inla.stack.data(stack_full),
-                family = "binomial", control.family = list(link = "logit"),
-                control.fixed = list(mean.intercept = 0, prec.intercept = 1e-4, mean = 0, prec = 1e-4),
-                control.predictor = list(A = inla.stack.A(stack_full), compute = TRUE),
-                control.compute   = list(dic=TRUE, waic=TRUE, cpo=TRUE, config=TRUE))
-    idx_pred <- inla.stack.index(stack_full, "pred")$data
-    pred_mean <- fit$summary.fitted.values[idx_pred, "mean"]
-    pred_grid_sf[[paste0("pred", i)]] <- pred_mean
-    pred_grid_sf[[paste0("pred", i, "_prob")]] <- plogis(pred_mean)
-    results[[paste0("model_", i)]] <- fit}
-  
-  return(list(models = results, predictions = pred_grid_sf))
-}
+## run_inla_overall function
 
 #Define formulas (use the same naming as before, spde object will be built inside the function)
 formulas <- list(
@@ -715,7 +647,62 @@ formulas <- list(
 
 
 
-## part six: maps (predictions and observed) ----
+## part six: sensitivity analysis for number of pits----
+
+## seed 1
+set.seed(111)
+mines_missing <- mine_times[,c("workers","fem_workers","building","mineral","num_pits", 
+                               "cyanide","mercury","site_type","facilities","closetores")]
+
+## m=30 imputations using all variables for the missing data model
+mines_imp <- mice(mines_missing, m = 30)
+
+# completed dataset for all imputations stacked together
+#all_complete <- complete(mines_imp, "long")  # adds a .imp column
+
+## pull the first 10 imputations to compare?
+mine_times_imp1 <- complete(mines_imp, 1)   
+mine_times$num_pits_imp1 <- as.numeric(mine_times_imp1$num_pits)
+mine_times_imp2 <- complete(mines_imp, 2)   
+mine_times$num_pits_imp2 <- as.numeric(mine_times_imp2$num_pits)
+mine_times_imp3 <- complete(mines_imp, 3)   
+mine_times$num_pits_imp3 <- as.numeric(mine_times_imp3$num_pits)
+mine_times_imp4 <- complete(mines_imp, 4)   
+mine_times$num_pits_imp4 <- as.numeric(mine_times_imp4$num_pits)
+mine_times_imp5 <- complete(mines_imp, 5)   
+mine_times$num_pits_imp5 <- as.numeric(mine_times_imp5$num_pits)
+mine_times_imp6 <- complete(mines_imp, 6)   
+mine_times$num_pits_imp6 <- as.numeric(mine_times_imp6$num_pits)
+mine_times_imp7 <- complete(mines_imp, 7)   
+mine_times$num_pits_imp7 <- as.numeric(mine_times_imp7$num_pits)
+mine_times_imp8 <- complete(mines_imp, 8)   
+mine_times$num_pits_imp8 <- as.numeric(mine_times_imp8$num_pits)
+mine_times_imp9 <- complete(mines_imp, 9)   
+mine_times$num_pits_imp9 <- as.numeric(mine_times_imp9$num_pits)
+mine_times_imp10 <- complete(mines_imp, 10)   
+mine_times$num_pits_imp10 <- as.numeric(mine_times_imp10$num_pits)
+
+## compile summary histogram for first 10 imputations?
+imp1 <- hist(log(mine_times$num_pits_imp1))
+imp2 <- hist(log(mine_times$num_pits_imp2))
+imp3 <- hist(log(mine_times$num_pits_imp3))
+imp4 <- hist(log(mine_times$num_pits_imp4))
+imp5 <- hist(log(mine_times$num_pits_imp5))
+imp6 <- hist(log(mine_times$num_pits_imp6))
+imp7 <- hist(log(mine_times$num_pits_imp7))
+imp8 <- hist(log(mine_times$num_pits_imp8))
+imp9 <- hist(log(mine_times$num_pits_imp9))
+imp10 <- hist(log(mine_times$num_pits_imp10))
+
+## average values across all 30 imputations?
+#mine_times$num_pits_imp_avg 
+
+#imp_avg <- hist(log(mine_times$num_pits_avg))
+
+## plot average values for each mine across all 30 imputations (red) against each one individually (gray/hollow?)
+
+
+## part seven: maps (predictions and observed) ----
 #pull DHS clusters for map
 nw_cluster <- nw_rdt[,c("lat", "long", "svy", "rdt")]
 cluster_prev <- nw_cluster %>% group_by(lat, long, svy) %>% summarise(n = n(), 
@@ -764,28 +751,9 @@ survey_specs <- list(list(svy = "dhs_2022", mine_data = mine_times_22, title = "
   list(svy = "dhs_2015", mine_data = mine_times_15, title = "2015-16 DHS"),
   list(svy = "ais_2011", mine_data = mine_times_11, title = "2011-12 AIS"))
 
-# Function to create prevalence map (clusters only)
-create_prev_map <- function(cluster_data, title) {
-  ggplot() + geom_sf(data = bounds, fill = "grey85") + 
-    geom_sf_text(data = bounds, aes(label = NAME_0), color = "grey35", size = 3, fontface = "italic") +
-    geom_sf(data = Victoria, fill = "skyblue", color = "skyblue") +
-    geom_sf(data = district_valid, fill = "grey90", color="grey70") +
-    geom_point(data = cluster_data, aes(x = long, y = lat, color = prevalence), shape = 16, size = 4) +
-    scale_color_viridis_c(option = "rocket", name = "Prevalence", direction = -1) +
-    coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1.2)) + theme_void() + ggtitle(paste0(title, " analysis clusters"))
-}
+## create_prev_map function
 
-# Function to create mine locations map
-create_mine_map <- function(mine_data, title) {
-  ggplot() + geom_sf(data = bounds, fill = "grey85") + 
-    geom_sf_text(data = bounds, aes(label = NAME_0), color = "grey35", size = 3, fontface = "italic") +
-    geom_sf(data = Victoria, fill = "skyblue", color = "skyblue") +
-    geom_sf(data = district_valid, fill = "grey90", color="grey70") +
-    geom_sf(data = mine_data, aes(shape = size, color = size), size = 3.5, alpha = 0.6) + 
-    scale_shape_manual(values = c("artisanal" = 17, "industrial" = 15), name = "Mine type") +
-    scale_color_manual(values = c("artisanal" = "plum3", "industrial" = "tomato3"), name = "Mine type") +
-    coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1.2)) + theme_void() + ggtitle(paste0("Mines assumed active during ", title))
-}
+## create_mine_map function
 
 # Generate prevalence maps (top row)
 prev_maps <- lapply(survey_specs, function(spec) {
@@ -845,4 +813,6 @@ mine_maps <- lapply(survey_specs, function(spec) {
 
 #model3b_pits <- ggarrange(pred_mpits, pred_lpits, nrow = 1, ncol = 2)
 #ggsave("C:/Users/cgait/OneDrive/Desktop/model3b_pits.jpeg",width=20,height=15,units=c("cm"),model3b_pits)
+
+
 
