@@ -437,8 +437,7 @@ mean_indust <- mean(nw_rdt$nearest_indust)
 nw_rdt$nearest_industc <- nw_rdt$nearest_indust - mean_indust
 
 #nearest number of pits recode
-nw_rdt <- nw_rdt %>% mutate(nnpits_2level = case_when(nearest_num_pits <= 18 ~ 0,
-                            nearest_num_pits > 18  ~ 1))
+nw_rdt <- nw_rdt %>% mutate(nnpits_2level = case_when(nearest_num_pits <= 18 ~ 0, nearest_num_pits > 18  ~ 1))
 
 #interactions between number of pits at nearest mine, 
 #and average number of pits at mines within 21 km (model 3 rho estimate)
@@ -448,6 +447,10 @@ nw_rdt$nmines_rho_x_prox <-nw_rdt$num_mines_rho*nw_rdt$nearest_dist
 nw_rdt$avg_pits_x_prox <- nw_rdt$avg_pits_rho*nw_rdt$nearest_dist
 
 remove(rwa, bur, africa, uga, tza, mines_missing, complete1, mine_times_imp1, mines_imp)
+
+table(mine_times$mineral, useNA = "always")
+84/447
+
 
 ## part three: risk factor analysis ----
 ## still need to define DHS survey design (weight = individual survey weight??)
@@ -469,20 +472,13 @@ options(survey.lonely.psu="adjust")
 rdt_svy<- function(var) {m <- svyglm(as.formula(paste0('rdt ~', var)), DHS, family=quasibinomial("identity"))
 cbind(tidy(m), confint(m))}
 
-adj_svy<- function(var) {m <- svyglm(as.formula(paste0('rdt ~',var,'+ nearest_num_pits')),DHS,family=quasibinomial("identity"))
-cbind(tidy(m), confint(m))}
-
 #variables for glms
-studyvars <-c("female","age","close_big","HV270","urban","livestock","pits_2level", "water_cat","elevationb")
+studyvars <-c("female","age","close_big","close_mine","HV270","urban","livestock","pits_2level","water_cat","elevationb")
 
 #map across study variables
 #nwsvy_glm<- map_dfr(studyvars, rdt_svy)
 #colnames(nwsvy_glm) <- c('term','estimate','std.error','statistic','p.value','CIL_95','CIU_95')
 #nwsvy_glm %>% print(noSpaces=T) 
-
-nwsvy_adj<- map_dfr(studyvars, adj_svy)
-colnames(nwsvy_adj) <- c('term','estimate','std.error','statistic','p.value','CIL_95','CIU_95')
-nwsvy_adj %>% print(noSpaces=T) 
 
 # Create better labels for the variables
 #nwsvy_glm_plot <- nwsvy_glm %>% filter(!grepl("Intercept", term)) %>%  # Remove intercept terms
@@ -492,14 +488,7 @@ nwsvy_adj %>% print(noSpaces=T)
 #      term == "pits_2level1" ~ "0-18 pits at nearest mine (vs 19-330 pits)", term == "water_cat1" ~ "Piped water source (vs unpiped)",
 #      term == "elevationb1" ~ "Elevation > 1500 m (vs < 1500 m)", TRUE ~ term), significant = p.value < 0.05)
 
-nwsvy_adj_plot <- nwsvy_adj %>% filter(!grepl("Intercept", term)) %>% filter(!grepl("nearest_num_pits", term)) %>% 
-  mutate(label = case_when(term == "female1" ~ "Female (vs male)", term == "age" ~ "Age (years)",
-    term == "close_big1" ~ "Close (within 15 km) to industrial mine",
-    term == "HV270" ~ "Wealth quintile", term == "urban1" ~ "Urban (vs rural)", term == "livestock1" ~ "Owns livestock",
-    term == "pits_2level1" ~ "0-18 pits at nearest mine (vs 19-330 pits)", term == "water_cat1" ~ "Piped water source (vs unpiped)",
-    term == "elevationb1" ~ "Elevation > 1500 m (vs < 1500 m)", TRUE ~ term), significant = p.value < 0.05)
-
-# Create forest plots
+# Create forest plot
 #bivar_forest <- ggplot(nwsvy_glm_plot, aes(x = estimate, y = reorder(label, estimate))) +
 #  geom_vline(xintercept = 0, linetype = "dashed", color = "gray80", linewidth = 0.8) +
 #  geom_errorbarh(aes(xmin = CIL_95, xmax = CIU_95, color = significant), height = 0.3, linewidth = 0.8) +
@@ -507,22 +496,15 @@ nwsvy_adj_plot <- nwsvy_adj %>% filter(!grepl("Intercept", term)) %>% filter(!gr
 #  scale_color_manual(values = c("FALSE" = "pink3", "TRUE" = "maroon4"), labels = c("p > 0.05", "p < 0.05")) +
 #  labs(title = "Risk Factors for RDT Positivity", subtitle = "Unadjusted GLM", 
 #       x = "Prevalence Difference (95% CI)", y = "", color = "Significance") +
-#  theme_classic(base_size = 16) + theme(plot.title = element_text(face = "bold", size = 18),
-#    plot.subtitle = element_text(color = "gray30"), panel.grid.minor = element_blank(),
-#    panel.grid.major.y = element_blank(), legend.position = "bottom")
+#  theme_classic(base_size = 18) + theme(panel.grid.major.y = element_blank(), 
+#          panel.grid.minor = element_blank(),axis.text.y = element_text(size = 18),axis.text.x = element_text(size=18),
+#          plot.subtitle = element_text(color = "gray30"), legend.position = "bottom")
 #bivar_forest
 
-adjusted_forest <- ggplot(nwsvy_adj_plot, aes(x = estimate, y = reorder(label, estimate))) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "gray80", linewidth = 0.8) +
-  geom_errorbarh(aes(xmin = CIL_95, xmax = CIU_95, color = significant), height = 0.3, linewidth = 0.8) +
-  geom_point(aes(color = significant), size = 3, shape = 18) +
-  scale_color_manual(values = c("FALSE" = "pink3", "TRUE" = "maroon4"), labels = c("p > 0.05", "p < 0.05")) +
-  labs(title = "Risk Factors for RDT Positivity", subtitle = "Adjusted (for number of pits at the nearest mine) GLM", 
-       x = "Prevalence Difference (95% CI)", y = "", color = "Significance") +
-  theme_classic(base_size = 16) + theme(plot.title = element_text(face = "bold", size = 18),
-      plot.subtitle = element_text(color = "gray30"), panel.grid.minor = element_blank(),
-      panel.grid.major.y = element_blank(), legend.position = "bottom")
-#adjusted_forest
+## chemical use in mine sites (and missing data for chemical use)
+#table(mine_times$cyanide, useNA = "always")
+#table(mine_times$mercury, useNA = "always")
+#table(mine_times$cyanide, mine_times$mercury, useNA = "always")
 
 
 
@@ -662,26 +644,24 @@ formulas <- list(
 
 ## part five: EMM by number of pits-----
 
-## EMM assessed using models with interaction terms
-## could also export beta 1s for unadjusted models? just for comparison
-emm_formulas <- list(
+## EMM assessed using models with interaction terms and unadjusted beta 1s
+#emm_formulas <- list(
   #Model 1: nearest distance (proximity) (+ spatial random effect for all models)
-  formula1 <- y ~ 0 + Intercept + nearest_dist + f(spatial0, model = spde),
+#  formula1 <- y ~ 0 + Intercept + nearest_dist + f(spatial0, model = spde),
   #Model 2: number of pits at the nearest mine 
-  formula2 <- y ~ 0 + Intercept + nearest_num_pits + f(spatial0, model = spde),
+#  formula2 <- y ~ 0 + Intercept + nearest_num_pits + f(spatial0, model = spde),
   #Model 3: average number of pits at mines within rho (21 km) 
-   formula3 <- y ~ 0 + Intercept + avg_pits_rho + f(spatial0, model = spde),
+#   formula3 <- y ~ 0 + Intercept + avg_pits_rho + f(spatial0, model = spde),
   #Model 4 formula (DHS covariates + proximity + number of pits at nearest mine + nearest number of pits x proximity)
-  formula4 <- y ~ 0 + Intercept + nearest_dist + nearest_num_pits + elevation + age + sex + 
-    mis_2017 + dhs_2015 + ais_2011 + urban + wealth + npitxprox + f(spatial0, model = spde),
+#  formula4 <- y ~ 0 + Intercept + nearest_dist + nearest_num_pits + elevation + age + sex + 
+#    mis_2017 + dhs_2015 + ais_2011 + urban + wealth + npitxprox + f(spatial0, model = spde),
   #Model 5 formula (DHS covariates + proximity + average pits at mines w/in rho + average pits x proximity)
-  formula5 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + mis_2017 + dhs_2015 + 
-    ais_2011 + urban + wealth + avg_pits_rho + avg_pits_x_prox + f(spatial0, model = spde))
+#  formula5 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + mis_2017 + dhs_2015 + 
+#    ais_2011 + urban + wealth + avg_pits_rho + avg_pits_x_prox + f(spatial0, model = spde))
 
 #emm_out <- run_inla_overall(nw_rdt, mine_times, emm_formulas)
 
 #extract beta 1 for models 1-3, then interaction term betas for models 4 & 5, along with all credible intervals
-# Extract coefficients and credible intervals from EMM models
 #emm_coeffs <- data.frame(model = character(), parameter = character(),mean = numeric(),
 #  lower_95 = numeric(),upper_95 = numeric(), stringsAsFactors = FALSE)
 
@@ -716,9 +696,10 @@ emm_formulas <- list(
 #  upper_95 = emm_out$models$model_5$summary.fixed["avg_pits_x_prox", "0.975quant"]))
 
 # Add a more descriptive label column
-#emm_coeffs$label <- c("Model 2: RDT ~ Number of pits at nearest mine",
-#  "Model 3: RDT ~ Avg # of pits at mines within 21km", "Model 4 (adjusted): Number of pits × Proximity interaction coefficient",
-#  "Model 5 (adjusted): Avg # of pits × Proximity interaction coefficient")
+#emm_coeffs$label <- c("Model 1: RDT ~ Number of pits at nearest mine",
+#                      "Model 2: RDT ~ Avg # of pits at mines within 21km", 
+#                      "Model 3 (adjusted): Number of pits × Proximity interaction coefficient", 
+#                      "Model 4 (adjusted): Avg # of pits × Proximity interaction coefficient")
 
 # Reorder for plotting (bottom to top)
 #emm_coeffs$label <- factor(emm_coeffs$label, levels = rev(emm_coeffs$label))
@@ -726,12 +707,10 @@ emm_formulas <- list(
 # Create forest plot
 #emm_forest <- ggplot(emm_coeffs, aes(x = mean, y = label)) +
 #  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50", linewidth = 0.5) +
-#  geom_errorbarh(aes(xmin = lower_95, xmax = upper_95), height = 0.2, linewidth = 0.8, color = "orchid4") +
-#  geom_point(size = 3, color = "orchid4") + labs(title = "Effect Modification by Mining Intensity",
-#    subtitle = "Coefficients from INLA spatial models (95% Credible Intervals)",
-#    x = "Coefficient estimate", y = NULL) + theme_minimal(base_size = 14) +
-#  theme(panel.grid.major.y = element_blank(), panel.grid.minor = element_blank(),
-#    plot.title = element_text(face = "bold", size = 16), axis.text.y = element_text(size = 11))
+#  geom_errorbarh(aes(xmin = lower_95, xmax = upper_95), height = 0.2, linewidth = 0.9, color = "aquamarine3") +
+#  geom_point(size = 3, color = "aquamarine3") + labs(subtitle = "Coefficients from INLA spatial models (95% Credible Intervals)",
+#    x = "Coefficient estimate", y = NULL) + theme_classic(base_size = 18) + theme(panel.grid.major.y = element_blank(), 
+#    panel.grid.minor = element_blank(),axis.text.y = element_text(size = 16))
 #emm_forest
 
 
@@ -778,6 +757,56 @@ remove(africa, all_complete, cluster_coords, cluster_coord, clusters, clusters_s
        pred_nearest_dist, rwa, bur, uga, tza)
 
 
+## malaria prevalence (RDT) in each survey wave
+# Create a list of survey specifications
+survey_specs <- list(list(svy = "dhs_2022", mine_data = mine_times_22, title = "2022 DHS"),
+  list(svy = "mis_2017", mine_data = mine_times_17, title = "2017 MIS"),
+  list(svy = "dhs_2015", mine_data = mine_times_15, title = "2015-16 DHS"),
+  list(svy = "ais_2011", mine_data = mine_times_11, title = "2011-12 AIS"))
+
+# Function to create prevalence map (clusters only)
+create_prev_map <- function(cluster_data, title) {
+  ggplot() + geom_sf(data = bounds, fill = "grey85") + 
+    geom_sf_text(data = bounds, aes(label = NAME_0), color = "grey35", size = 3, fontface = "italic") +
+    geom_sf(data = Victoria, fill = "skyblue", color = "skyblue") +
+    geom_sf(data = district_valid, fill = "grey90", color="grey70") +
+    geom_point(data = cluster_data, aes(x = long, y = lat, color = prevalence), shape = 16, size = 4) +
+    scale_color_viridis_c(option = "rocket", name = "Prevalence", direction = -1) +
+    coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1.2)) + theme_void() + ggtitle(paste0(title, " analysis clusters"))
+}
+
+# Function to create mine locations map
+create_mine_map <- function(mine_data, title) {
+  ggplot() + geom_sf(data = bounds, fill = "grey85") + 
+    geom_sf_text(data = bounds, aes(label = NAME_0), color = "grey35", size = 3, fontface = "italic") +
+    geom_sf(data = Victoria, fill = "skyblue", color = "skyblue") +
+    geom_sf(data = district_valid, fill = "grey90", color="grey70") +
+    geom_sf(data = mine_data, aes(shape = size, color = size), size = 3.5, alpha = 0.6) + 
+    scale_shape_manual(values = c("artisanal" = 17, "industrial" = 15), name = "Mine type") +
+    scale_color_manual(values = c("artisanal" = "plum3", "industrial" = "tomato3"), name = "Mine type") +
+    coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1.2)) + theme_void() + ggtitle(paste0("Mines assumed active during ", title))
+}
+
+# Generate prevalence maps (top row)
+prev_maps <- lapply(survey_specs, function(spec) {
+  cluster_data <- cluster_prev %>% filter(svy == spec$svy)
+  create_prev_map(cluster_data, spec$title)
+})
+
+# Generate mine maps (bottom row)
+mine_maps <- lapply(survey_specs, function(spec) {
+  create_mine_map(spec$mine_data, spec$title)
+})
+
+# Combine all maps: prevalence on top row, mines on bottom row
+#all_maps <- c(prev_maps, mine_maps)
+
+# Arrange the maps: 2 rows (prevalence, then mines) x 4 columns (surveys)
+#svys_prev <- ggarrange(plotlist = all_maps, nrow = 2, ncol = 4)
+#svys_prev
+#ggsave("C:/Users/cgait/OneDrive/Desktop/svys_prev.jpeg",width=45,height=15,units=c("cm"),svys_prev)
+
+
 ## overall/combined plot across all survey waves, stratified by number of pits exposed to 
 #pred_mpits <- ggplot() + geom_sf(data = bounds, fill = "grey90") + geom_sf_text(data = bounds,
 #           aes(label = NAME_0),color = "grey35",size = 3, fontface = "italic") +
@@ -817,34 +846,3 @@ remove(africa, all_complete, cluster_coords, cluster_coord, clusters, clusters_s
 #model3b_pits <- ggarrange(pred_mpits, pred_lpits, nrow = 1, ncol = 2)
 #ggsave("C:/Users/cgait/OneDrive/Desktop/model3b_pits.jpeg",width=20,height=15,units=c("cm"),model3b_pits)
 
-
-## malaria prevalence (RDT) in each survey wave
-# Create a list of survey specifications
-survey_specs <- list(list(svy = "dhs_2022", mine_data = mine_times_22, title = "2022 DHS"),
-  list(svy = "mis_2017", mine_data = mine_times_17, title = "2017 MIS"),
-  list(svy = "dhs_2015", mine_data = mine_times_15, title = "2015-16 DHS"),
-  list(svy = "ais_2011", mine_data = mine_times_11, title = "2011-12 AIS"))
-
-# Function to create prevalence map
-create_prev_map <- function(cluster_data, mine_data, title) {
-  ggplot() + geom_sf(data = bounds, fill = "grey85") + 
-    geom_sf_text(data = bounds, aes(label = NAME_0), color = "grey35", size = 3, fontface = "italic") +
-    geom_sf(data = Victoria, fill = "skyblue", color = "skyblue") +
-    geom_sf(data = district_valid, fill = "grey90", color="grey70") +
-    geom_point(data = cluster_data, aes(x = long, y = lat, color = prevalence), shape = 16, size = 4) +
-    scale_color_viridis_c(option = "viridis", name = "Prevalence", direction = -1) +
-    new_scale("color") + geom_sf(data = mine_data, aes(shape = size, color = size), size = 3.5, alpha = 0.6) + 
-    scale_shape_manual(values = c("artisanal" = 17, "industrial" = 15), name = "Mine type") +
-    scale_color_manual(values = c("artisanal" = "plum3", "industrial" = "tomato3"), name = "Mine type") +
-    coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1.2)) + theme_void() + ggtitle(title)
-}
-
-# Generate all maps using lapply or purrr::map
-prev_maps <- lapply(survey_specs, function(spec) {
-  cluster_data <- cluster_prev %>% filter(svy == spec$svy)
-  create_prev_map(cluster_data, spec$mine_data, spec$title)
-})
-
-# Arrange the maps
-svys_prev <- ggarrange(plotlist = prev_maps, nrow = 2, ncol = 2)
-svys_prev
