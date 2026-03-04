@@ -657,49 +657,38 @@ mines_missing <- mine_times[,c("workers","fem_workers","building","mineral","num
 ## m=30 imputations using all variables for the missing data model
 mines_imp <- mice(mines_missing, m = 30)
 
-# completed dataset for all imputations stacked together
-#all_complete <- complete(mines_imp, "long")  # adds a .imp column
+# build a matrix of all 30 imputations' num_pits values
+all_pits <- sapply(1:30, function(i) {
+  as.numeric(complete(mines_imp, i)$num_pits)
+})
 
-## pull the first 10 imputations to compare?
-mine_times_imp1 <- complete(mines_imp, 1)   
-mine_times$num_pits_imp1 <- as.numeric(mine_times_imp1$num_pits)
-mine_times_imp2 <- complete(mines_imp, 2)   
-mine_times$num_pits_imp2 <- as.numeric(mine_times_imp2$num_pits)
-mine_times_imp3 <- complete(mines_imp, 3)   
-mine_times$num_pits_imp3 <- as.numeric(mine_times_imp3$num_pits)
-mine_times_imp4 <- complete(mines_imp, 4)   
-mine_times$num_pits_imp4 <- as.numeric(mine_times_imp4$num_pits)
-mine_times_imp5 <- complete(mines_imp, 5)   
-mine_times$num_pits_imp5 <- as.numeric(mine_times_imp5$num_pits)
-mine_times_imp6 <- complete(mines_imp, 6)   
-mine_times$num_pits_imp6 <- as.numeric(mine_times_imp6$num_pits)
-mine_times_imp7 <- complete(mines_imp, 7)   
-mine_times$num_pits_imp7 <- as.numeric(mine_times_imp7$num_pits)
-mine_times_imp8 <- complete(mines_imp, 8)   
-mine_times$num_pits_imp8 <- as.numeric(mine_times_imp8$num_pits)
-mine_times_imp9 <- complete(mines_imp, 9)   
-mine_times$num_pits_imp9 <- as.numeric(mine_times_imp9$num_pits)
-mine_times_imp10 <- complete(mines_imp, 10)   
-mine_times$num_pits_imp10 <- as.numeric(mine_times_imp10$num_pits)
+# row-wise mean gives you the average imputed value per mine
+mine_times$num_pits_imp_avg <- rowMeans(all_pits)
 
-## compile summary histogram for first 10 imputations?
-imp1 <- hist(log(mine_times$num_pits_imp1))
-imp2 <- hist(log(mine_times$num_pits_imp2))
-imp3 <- hist(log(mine_times$num_pits_imp3))
-imp4 <- hist(log(mine_times$num_pits_imp4))
-imp5 <- hist(log(mine_times$num_pits_imp5))
-imp6 <- hist(log(mine_times$num_pits_imp6))
-imp7 <- hist(log(mine_times$num_pits_imp7))
-imp8 <- hist(log(mine_times$num_pits_imp8))
-imp9 <- hist(log(mine_times$num_pits_imp9))
-imp10 <- hist(log(mine_times$num_pits_imp10))
+# define common breaks so all histograms align
+breaks <- hist(log(mine_times$num_pits_imp_avg), plot = FALSE)$breaks
 
-## average values across all 30 imputations?
-#mine_times$num_pits_imp_avg 
+# empty plot for axes
+hist(log(mine_times$num_pits_imp_avg), breaks = breaks,
+     main = "Imputed num_pits (log scale)",
+     xlab = "log(num_pits)", col = NA, border = NA)
 
-#imp_avg <- hist(log(mine_times$num_pits_avg))
+# layer all 30 imputations using the matrix columns directly
+for (i in 1:30) {
+  hist(log(all_pits[, i]),
+       breaks = breaks, col = rgb(0.25, 0.25, 0.25, 0.1),
+       border = "gray60", add = TRUE)
+}
 
-## plot average values for each mine across all 30 imputations (red) against each one individually (gray/hollow?)
+# overlay the average in red
+working_imputation <- hist(log(mine_times$num_pits_imp_avg), breaks = breaks,
+     col = rgb(1, 0, 0, 0.25), border = "pink3", add = TRUE)
+
+legend("topright", legend = c("Individual imputations (m=30)", "Average"),
+       fill = c(rgb(0.5, 0.5, 0.5, 0.3), rgb(1, 0, 0, 0.35)),
+       border = c("gray60", "pink3"))
+
+
 
 
 ## part seven: maps (predictions and observed) ----
