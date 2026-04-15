@@ -21,8 +21,8 @@ calculate_proximity <- function(year, mine_data, cluster_coords) {
   big_distances <- apply(cluster_coords[, c("lat", "long")], 1, function(point) distHaversine(point, big_mine_coords))
   
   # Count mines within 28.05 km
-  mines_within_rho <- apply(distances, 2, function(d) sum(d < 28050))
-  big_mines_within_rho <- apply(big_distances, 2, function(d) sum(d < 28050))
+  mines_within_rho <- apply(distances, 2, function(d) sum(d < 25540))
+  big_mines_within_rho <- apply(big_distances, 2, function(d) sum(d < 25540))
   
   # Find nearest distances
   nearest_distances <- apply(distances, 2, min) / 1000 # km
@@ -63,7 +63,7 @@ pits_proximity <- function(year, mine_data, cluster_coords) {
   
   # Average num_pits within 21 km
   avg_pits_rho <- apply(distances, 2, function(d) {
-    pits <- mines$num_pits[d < 28050]
+    pits <- mines$num_pits[d < 25540]
     if (length(pits) > 0) mean(pits, na.rm = TRUE) else 0
   })
   
@@ -120,7 +120,12 @@ run_inla_overall <- function(dat, mine_times, formulas, mesh, spde,
                              grid_extent = c(29.4, 35, -5.5, -0.5)) {
   
   # rebuild observation stack from the SUBSETTED data
-  coords <- cbind(dat$long, dat$lat)
+  # project lon/lat to km to match the mesh coordinate system
+  R <- 6371
+  lat0 <- mean(dat$lat, na.rm = TRUE) * pi / 180
+  x_km <- R * (dat$long * pi / 180) * cos(lat0)
+  y_km <- R * (dat$lat * pi / 180)
+  coords <- cbind(x_km, y_km)
   A_obs_sub <- inla.spde.make.A(mesh, loc = coords)
   A_obs_slope <- Matrix::Diagonal(n = nrow(A_obs_sub), x = dat$nearest_distc) %*% A_obs_sub
   
@@ -137,10 +142,10 @@ run_inla_overall <- function(dat, mine_times, formulas, mesh, spde,
                  mis_2017 = dat$mis_2017, dhs_2015 = dat$dhs_2015,
                  ais_2011 = dat$ais_2011, urban = dat$urban,
                  wealth = dat$wealthc, indust = dat$nearest_industc,
-                 nearest_num_pits = dat$nearest_num_pits, avg_pits_rho = dat$avg_pits_rho,
-                 npitxprox = dat$npitxprox, num_mines_rho = dat$num_mines_rho,
+                 nearest_num_pits = dat$nearest_num_pitsc, avg_pits_rho = dat$avgpits_rhoc,
+                 npitxprox = dat$npitxprox, num_mines_rho = dat$num_mines_rhoc,
                  nmines_rho_x_prox = dat$nmines_rho_x_prox,
-                 avg_pits_x_prox = dat$avg_pits_x_prox)),
+                 avg_pits_x_prox = dat$avg_pits_x_prox, avgpits_2level = dat$avgpits_2level)),
     tag = "obs")
   
   # prediction stack (same grid for all strata)
@@ -156,7 +161,7 @@ run_inla_overall <- function(dat, mine_times, formulas, mesh, spde,
                  elevation = NA, age = NA, sex = NA, mis_2017 = NA, dhs_2015 = NA,
                  ais_2011 = NA, urban = NA, indust = NA, wealth = NA,
                  nearest_num_pits = NA, npitxprox = NA, num_mines_rho = NA,
-                 nmines_rho_x_avg_pits = NA, avg_pits_x_prox = NA)),
+                 nmines_rho_x_avg_pits = NA, avg_pits_x_prox = NA, avgpits_2level = NA)),
     tag = "pred")
   
   stack_full <- inla.stack(stack_obs, stack_pred)
@@ -263,7 +268,7 @@ run_range_sensitivity <- function(range_val, range_prob, mesh, stack_full) {
   
   # Build formula HERE so it captures the local spde
   formula_local <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +
-    mis_2017 + dhs_2015 + ais_2011 + urban + wealth + indust + f(spatial0, model = spde)
+    mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde)
   
   tryCatch({
     mod <- inla(formula_local, family = "binomial",
@@ -298,7 +303,7 @@ run_var_sensitivity <- function(var_val, var_prob, formula, mesh, stack_full) {
                               prior.sigma = c(var_val, var_prob))
   # Build formula HERE so it captures the local spde
   formula_local <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +
-    mis_2017 + dhs_2015 + ais_2011 + urban + wealth + indust + f(spatial0, model = spde)
+    mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde)
   
   tryCatch({
     mod <- inla(formula_local, family = "binomial",
