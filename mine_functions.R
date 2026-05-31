@@ -142,9 +142,10 @@ run_inla_overall <- function(dat, mine_times, formulas, mesh, spde,
                  mis_2017 = dat$mis_2017, dhs_2015 = dat$dhs_2015,
                  ais_2011 = dat$ais_2011, urban = dat$urban,
                  wealth = dat$wealthc, indust = dat$nearest_industc,
-                 nearest_num_pits = dat$nearest_num_pitsc, avg_pits_rho = dat$avgpits_rhoc,
+                 nearest_num_pits = dat$nearest_num_pitsc, avg_pits_rho = dat$avg_pits_rhoc,
                  npitxprox = dat$npitxprox, num_mines_rho = dat$num_mines_rhoc,
                  nmines_rho_x_prox = dat$nmines_rho_x_prox,
+                 dhs_temp = dat$dhs_temp, rain = dat$rain, veg = dat$veg, 
                  avg_pits_x_prox = dat$avg_pits_x_prox, avgpits_2level = dat$avgpits_2level)),
     tag = "obs")
   
@@ -160,7 +161,8 @@ run_inla_overall <- function(dat, mine_times, formulas, mesh, spde,
       data.frame(Intercept = rep(1, n_pred), nearest_dist = pred_nearest_dist,
                  elevation = NA, age = NA, sex = NA, mis_2017 = NA, dhs_2015 = NA,
                  ais_2011 = NA, urban = NA, indust = NA, wealth = NA,
-                 nearest_num_pits = NA, npitxprox = NA, num_mines_rho = NA,
+                 nearest_num_pits = NA, npitxprox = NA, num_mines_rho = NA, 
+                 avg_pits_rho = NA, dhs_temp = NA, rain = NA, veg = NA, 
                  nmines_rho_x_avg_pits = NA, avg_pits_x_prox = NA, avgpits_2level = NA)),
     tag = "pred")
   

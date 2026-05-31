@@ -1,9 +1,9 @@
 ## Malaria in TZ national surveys from 2011-2022, predicted by proximity to artisanal and industrial mines----
 
-## part one:   data extract and organization ----
+## part one:    data extract and organization ----
 
 set.seed(321)
-source("mine_functions.R")
+source("C:/Users/cgait/OneDrive/Desktop/TZ mining/mine_functions.R")
 
 library(broom)
 library(broom.mixed)
@@ -27,6 +27,7 @@ library(pscl)
 library(purrr)
 library(readr)
 library(readxl)
+library(scico)
 library(sf)
 library(statmod)
 library(stars)
@@ -64,8 +65,16 @@ mines <- as.data.frame(mines)
 #bigger mines in north west TZ manually compiled from mention in the IPIS report 
 big_mines <- read_excel("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/big_mines.xlsx")
 
-#read back in subsetted roads
-#roads_123 <- st_read("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/roads_shp/roads_123.shp")
+#ecology data from CHIRPS & MODIS 
+vegi22 <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/eco_data/vegi_sf/vegi22.shp")
+vegi17 <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/eco_data/vegi_sf/vegi17.shp")
+vegi16 <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/eco_data/vegi_sf/vegi16.shp")
+vegi15 <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/eco_data/vegi_sf/vegi15.shp")
+vegi12 <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/eco_data/vegi_sf/vegi12.shp")
+vegi11 <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/eco_data/vegi_sf/vegi11.shp")
+admin <- read_sf("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/regions/tza_admbnda_adm2_20181019/tza_admbnda_adm2_20181019.shp")
+rain <- read_excel("C:/Users/cgait/OneDrive/Desktop/TZ mining/data/eco_data/avg_precip.xlsx")
+
 #bordering countries in Africa
 africa <- st_read("C:/Users/cgait/OneDrive/Desktop/IDEEL/Rwanda nonpf/data/data downloads/Africa_Boundaries-shp/Africa_Boundaries.shp")
 #regional boundaries
@@ -109,7 +118,6 @@ mines <- mines %>% mutate(min_years = case_when(building=="None" ~ 0,
 # ~year mine has been operational since, y_open
 mines$year_open <- 2018-mines$min_years
 mines$year_close <- 2024   # assume all mines mapped in 2018 are still open in 2022..
-# re-examine at some point critically
 
 
 ## DHS or other survey geography & ecology data at cluster level, for each survey year
@@ -178,8 +186,119 @@ tz_mis17 <- left_join(tz_mis17, geo_17, by = "HV001")
 tz_dhs15 <- left_join(tz_dhs15, geo_15, by = "HV001")
 tz_ais11 <- left_join(tz_ais11, geo_11, by = "HV001")
 
-#removed CHIRPS rain and vegetation data attachment here
-#only keeping survey temperatures because it is so short
+
+## attach monthly ecology data to survey datasets based on survey month
+#re-defining survey years because vegetation is current not 1 month lagged
+tz_dhs16 <- subset(tz_dhs15, HV006 == 1| HV006 == 2)
+tz_dhs15 <- subset(tz_dhs15, HV006 == 8| HV006 == 9| HV006 == 10| HV006 == 11| HV006 == 12)
+tz_ais12 <- subset(tz_ais11, HV006 == 1| HV006 == 2| HV006 == 3| HV006 == 4| HV006 == 5)
+tz_ais11 <- subset(tz_ais11, HV006 == 12)
+
+tz_dhs22 <- left_join(tz_dhs22, vegi22, by = "HV001")
+tz_mis17 <- left_join(tz_mis17, vegi17, by = "HV001")
+tz_dhs16 <- left_join(tz_dhs16, vegi16, by = "HV001")
+tz_dhs15 <- left_join(tz_dhs15, vegi15, by = "HV001")
+tz_ais12 <- left_join(tz_ais12, vegi12, by = "HV001")
+tz_ais11 <- left_join(tz_ais11, vegi11, by = "HV001")
+
+#add avg_vim to each survey based on month!
+tz_dhs22 <- tz_dhs22 %>% mutate(veg = case_when(HV006 == 2 ~ vim_02,
+                                                HV006 == 3 ~ vim_03, HV006 == 4 ~ vim_04, HV006 == 5 ~ vim_05,
+                                                HV006 == 6 ~ vim_06, HV006 == 7 ~ vim_07))
+tz_mis17 <- tz_mis17 %>% mutate(veg = case_when(HV006 == 10 ~ vim_10,
+                                                HV006 == 11 ~ vim_11, HV006 == 12 ~ vim_12))
+tz_dhs16 <- tz_dhs16 %>% mutate(veg = case_when(HV006 == 1 ~ vim_01, HV006 == 2 ~ vim_02))
+tz_dhs15 <- tz_dhs15 %>% mutate(veg = case_when(HV006 == 8 ~ vim_08,
+                                                HV006 == 9 ~ vim_09, HV006 == 10 ~ vim_10, HV006 == 11 ~ vim_11,
+                                                HV006 == 12 ~ vim_12))
+tz_ais12 <- tz_ais12 %>% mutate(veg = case_when(HV006 == 1 ~ vim_01,
+                                                HV006 == 2 ~ vim_02, HV006 == 3 ~ vim_03, HV006 == 4 ~ vim_04,
+                                                HV006 == 5 ~ vim_05)) 
+tz_ais11 <- tz_ais11 %>% mutate(veg = case_when(HV006 == 11 ~ vim_11, HV006 == 12 ~ vim_12)) 
+
+#re-attach separated survey years ...
+tz_dhs15 <- rbind(tz_dhs15, tz_dhs16)
+tz_ais11 <- rbind(tz_ais11, tz_ais12)
+remove(tz_dhs16,tz_ais12)
+
+
+#CHIRPS prior monthly average precipitation 
+#subset rain into survey years..
+rain$HV001 <- rain$id
+rain <- rain[,c("HV001","year","month","avg_chirps")]
+
+#subset into survey years 
+rain22 <- subset(rain, year == 2022)
+rain17 <- subset(rain, year == 2017)
+rain16 <- subset(rain, year == 2016 & month %in% c("01"))
+rain15 <- subset(rain, year == 2015)
+rain12 <- subset(rain, year == 2012)
+rain11 <- subset(rain, year == 2011 & month %in% c("11","12"))
+
+#convert precipitation average into columns for each month
+rain22 <- rain22 %>% pivot_wider(names_from = month, values_from = avg_chirps)
+rain22 <- rain22 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
+rain17 <- rain17 %>% pivot_wider(names_from = month, values_from = avg_chirps)
+rain17 <- rain17 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
+rain16 <- rain16 %>% pivot_wider(names_from = month, values_from = avg_chirps)
+rain16 <- rain16 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
+rain15 <- rain15 %>% pivot_wider(names_from = month, values_from = avg_chirps)
+rain15 <- rain15 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
+rain12 <- rain12 %>% pivot_wider(names_from = month, values_from = avg_chirps)
+rain12 <- rain12 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
+rain11 <- rain11 %>% pivot_wider(names_from = month, values_from = avg_chirps)
+rain11 <- rain11 %>% rename_with(~ paste0("chirps_", .), .cols = matches("^\\d{2}$"))
+
+#join rain data to each survey year
+#right now it's too confusing to keep them in original surveys and match by month and year
+#so will maybe condense in the future but for now this is easier
+tz_dhs16 <- subset(tz_dhs15, HV006 == 2)
+tz_dhs15 <- subset(tz_dhs15, HV006 == 8| HV006 == 9| HV006 == 10| HV006 == 11| HV006 == 12| HV006 == 1)
+tz_ais12 <- subset(tz_ais11, HV006 == 2| HV006 == 3| HV006 == 4| HV006 == 5)
+tz_ais11 <- subset(tz_ais11, HV006 == 12| HV006 == 1)
+
+tz_dhs22 <- left_join(tz_dhs22, rain22, by = "HV001")
+tz_mis17 <- left_join(tz_mis17, rain17, by = "HV001")
+tz_dhs16 <- left_join(tz_dhs16, rain16, by = "HV001")
+tz_dhs15 <- left_join(tz_dhs15, rain15, by = "HV001")
+tz_ais12 <- left_join(tz_ais12, rain12, by = "HV001")
+tz_ais11 <- left_join(tz_ais11, rain11, by = "HV001")
+
+#finally match based on survey month!
+tz_dhs22 <- tz_dhs22 %>% mutate(rain = case_when(HV006 == 2 ~ chirps_01,
+                                                 HV006 == 3 ~ chirps_02, HV006 == 4 ~ chirps_03,
+                                                 HV006 == 5 ~ chirps_04, HV006 == 6 ~ chirps_05, HV006 == 7 ~ chirps_06))
+tz_mis17 <- tz_mis17 %>% mutate(rain = case_when(HV006 == 10 ~ chirps_09,
+                                                 HV006 == 11 ~ chirps_10, HV006 == 12 ~ chirps_11))
+tz_dhs16 <- tz_dhs16 %>% mutate(rain = case_when(HV006 == 2 ~ chirps_01))
+tz_dhs15 <- tz_dhs15 %>% mutate(rain = case_when(HV006 == 1 ~ chirps_12,
+                                                 HV006 == 8 ~ chirps_07, HV006 == 9 ~ chirps_08,
+                                                 HV006 == 10 ~ chirps_09, HV006 == 11 ~ chirps_10, HV006 == 12 ~ chirps_11))
+tz_ais12 <- tz_ais12 %>% mutate(rain = case_when(HV006 == 2 ~ chirps_01,
+                                                 HV006 == 3 ~ chirps_02, HV006 == 4 ~ chirps_03, HV006 == 5 ~ chirps_04)) 
+tz_ais11 <- tz_ais11 %>% mutate(rain = case_when(HV006 == 1 ~ chirps_12, HV006 == 12 ~ chirps_11)) 
+
+#empty columns so we can merge :{
+tz_ais11$chirps_01 <- NA
+tz_ais11$chirps_02 <- NA
+tz_ais11$chirps_03 <- NA
+tz_ais11$chirps_04 <- NA
+tz_ais12$chirps_11 <- NA
+tz_ais12$chirps_12 <- NA
+tz_dhs15$chirps_01 <- NA
+tz_dhs16$chirps_07 <- NA
+tz_dhs16$chirps_08 <- NA
+tz_dhs16$chirps_09 <- NA
+tz_dhs16$chirps_10 <- NA
+tz_dhs16$chirps_11 <- NA
+tz_dhs16$chirps_12 <- NA
+
+#re-attach separated survey years ...
+tz_dhs15 <- rbind(tz_dhs15, tz_dhs16)
+tz_ais11 <- rbind(tz_ais11, tz_ais12)
+remove(tz_dhs16,tz_ais12)
+
+
 #DHS monthly average temp (month of survey, not prior month)
 tz_dhs22 <- tz_dhs22 %>% mutate(dhs_temp = case_when(HV006 == 2 ~ Temperature_February,
             HV006 == 3 ~ Temperature_March, HV006 == 4 ~ Temperature_April,
@@ -206,7 +325,7 @@ remove(TZ22_pr, TZ17_pr, TZ15_pr, TZ11_pr, rain, rain22, rain17, rain15, rain16,
 
 
 
-## part two:   create mine exposure data ----
+## part two:    create mine exposure data ----
 
 #add indicators for survey years and months
 tz_dhs22$svy <- "dhs_2022"
@@ -330,7 +449,7 @@ tz_rdt$year <- tz_rdt$year.x
 
 #clean workspace againnn
 remove(tz_geo_prox,big_mines,mines,proximity_data,
-       tz_ais11, tz_ais12, tz_dhs15, tz_dhs16, tz_mis17, tz_dhs22, tz_dhs,
+       tz_ais11, tz_ais12, tz_dhs15, tz_dhs16, tz_mis17, tz_dhs22,
        ccoord11, ccoord12, ccoord15, ccoord16, ccoord17, ccoord22)
 
 
@@ -391,7 +510,7 @@ remove(rwa, bur, africa, uga, tza)
 
 
 
-## part three: risk factor analysis ----
+## part three:  risk factor analysis ----
 
 ## DHS survey design weight = household survey weight (HV005)
 ## should double check that it is fine to combine across surveys like this?
@@ -515,7 +634,7 @@ mean_mines <- mean(nw_rdt$num_mines_rho)
 nw_rdt$num_mines_rhoc <- nw_rdt$num_mines_rho - mean_mines
 #centered average number of pits at mines within rho
 mean_avgnumpits <- mean(nw_rdt$avg_pits_rho)
-nw_rdt$avgpits_rhoc <- nw_rdt$avg_pits_rho - mean_avgnumpits
+nw_rdt$avg_pits_rhoc <- nw_rdt$avg_pits_rho - mean_avgnumpits
 
 ## table 1: study population characteristics (northwest subset and overall)
 
@@ -554,7 +673,7 @@ tz_total_count <- tz_total(svy_vars) %>% bind_rows(.id = "variable")
 
 
 
-## part four:  spatial models using INLA ------
+## part four:   spatial models using INLA ------
 
 ## interaction terms for future EMM models
 nw_rdt$npitxprox <- nw_rdt$nearest_num_pits*nw_rdt$nearest_dist
@@ -589,6 +708,14 @@ A_pred <- inla.spde.make.A(mesh, loc = pred_coords)
 n_pred <- nrow(pred_coords)
 
 # 4) Compute nearest mine distance for prediction grid
+## using nearest industrial mine in nearest distance calculations
+#indust_times <- mine_times %>% filter(size=="industrial")
+#mine_times_sf <- st_as_sf(indust_times, coords = c("long", "lat"), crs = 4326)
+## restricting mine exposure to mines with chemicals reported
+#mercury_times <- mine_times %>% filter(mercury==1)
+#cyanide_times <- mine_times %>% filter(cyanide==1)
+#chem_times <- unique(bind_rows(mercury_times, cyanide_times))
+#mine_times_sf <- st_as_sf(chem_times, coords = c("long", "lat"), crs = 4326)
 mine_times_sf <- st_as_sf(mine_times, coords = c("long", "lat"), crs = 4326)
 nearest_distances <- st_distance(pred_grid_sf, mine_times_sf)
 pred_grid_sf$nearest_dist <- apply(nearest_distances, 1, min) / 1000  # convert to km
@@ -596,11 +723,13 @@ pred_grid_sf$nearest_dist <- apply(nearest_distances, 1, min) / 1000  # convert 
 #centered variable for nearest distance
 grid_mean_dist <- mean(pred_grid_sf$nearest_dist)
 pred_grid_sf$nearest_distc <- pred_grid_sf$nearest_dist - grid_mean_dist
+#if we are using industrial mines above
+#pred_grid_sf$nearest_industc <- pred_grid_sf$nearest_distc
 
 # 5) A for observation stack 
 A_obs_sub <- inla.spde.make.A(mesh, loc = coords) 
 # separate As for observations and spatial slope?
-A_obs_slope <- Matrix::Diagonal(n = nrow(A_obs_sub), x = dat$nearest_distc) %*% A_obs_sub   # centered nearest distance 
+A_obs_slope <- Matrix::Diagonal(n = nrow(A_obs_sub), x = dat$nearest_distc) %*% A_obs_sub   # centered nearest distance, change to indust if necessary 
 
 # 6) two separate SPDE indices (same mesh/spde, different names) 
 spde_idx0 <- inla.spde.make.index("spatial0", n.spde = spde$n.spde) 
@@ -616,24 +745,26 @@ stack_obs <- inla.stack(data = list(y = dat$rdt),
                                         mis_2017 = dat$mis_2017, dhs_2015 = dat$dhs_2015, 
                                         ais_2011 = dat$ais_2011, urban = dat$urban, 
                                         indust = dat$nearest_industc, wealth = dat$wealthc, 
-                                        nearest_num_pits = dat$nearest_num_pits, avg_pits_rho = dat$avg_pits_rho,
+                                        nearest_num_pits = dat$nearest_num_pits, avg_pits_rho = dat$avg_pits_rhoc,
                                         npitxprox = dat$npitxprox, num_mines_rho = dat$num_mines_rho, 
                                         nmines_rho_x_prox = dat$nmines_rho_x_prox, 
                                         avg_pits_x_prox = dat$avg_pits_x_prox,
-                                        avgpits_2level = dat$avgpits_2level)), tag = "obs") 
+                                        avgpits_2level = dat$avgpits_2level,
+                                        dhs_temp = dat$dhs_temp, rain = dat$rain, veg = dat$veg)), tag = "obs") 
 
 # 8) stack_pred: must mirror the SAME 3 A blocks as observation stack
 # using the same centered/scaled nearest_dist variable as in training 
-pred_nearest_dist <- pred_grid_sf$nearest_distc # centered 
+pred_nearest_dist <- pred_grid_sf$nearest_distc # centered, change to indust if necessary 
 A_pred_slope <- Matrix::Diagonal(n = nrow(A_pred), x = pred_nearest_dist) %*% A_pred 
 
 # 9) prediction stack for all data
 stack_pred <- inla.stack(data = list(y = NA), A = list(A_pred, A_pred_slope, 1), effects = list(
                 spatial0 = spde_idx0, spatial_slope = spde_idx1, data.frame(Intercept = rep(1, n_pred), # n_pred rows
-                nearest_dist = pred_nearest_dist,    # prediction grid values
+                nearest_dist = pred_nearest_dist,    # prediction grid values, unless we are using indust
         elevation = NA, age = NA, sex = NA, mis_2017 = NA,  dhs_2015 = NA, ais_2011 = NA, 
         urban = NA, indust = NA, wealth = NA, nearest_num_pits = NA, npitxprox = NA, num_mines_rho = NA, 
-        nmines_rho_x_avg_pits = NA, avg_pits_x_prox = NA, avgpits_2level = NA)), tag = "pred")
+        nmines_rho_x_avg_pits = NA, avg_pits_x_prox = NA, avg_pits_rho = NA, dhs_temp = NA,
+        rain = NA, veg = NA)), tag = "pred")
 
 # 10) Combine observed + prediction stacks
 stack_full <- inla.stack(stack_obs, stack_pred)
@@ -645,38 +776,37 @@ formulas <- list(
                           mis_2017 + dhs_2015 + ais_2011 + urban + wealth,
   formula3a <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +
     mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde),
-## formula3b <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +
-##    mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde) + f(spatial1, model = spde))
-                formula4 <- y ~ 0 + Intercept + nearest_dist + indust + f(spatial0, model = spde), 
+# formula3b <- y ~ 0 + Intercept + avg_pits_rho + elevation + age + sex +
+#    mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde))
+               formula4 <- y ~ 0 + Intercept + nearest_dist + indust + f(spatial0, model = spde), 
                 formula5 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +  
-                         mis_2017 + dhs_2015 + ais_2011 + urban + wealth + indust + f(spatial0, model = spde))
+                         mis_2017 + dhs_2015 + ais_2011 + urban + wealth + indust + f(spatial0, model = spde),
+                formula6 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + dhs_temp + rain + veg +  
+                         mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde))
 
 ## run and export overall results (un-stratified)
 #out_all <- run_inla_overall(nw_rdt, mine_times, formulas, mesh, spde, pred_grid_sf, A_pred, n_pred)
 
-# Extract WAIC, DIC, and hyperpar means for all 5 models
-#results <- dplyr::bind_rows(lapply(1:5, function(i) {
+# Extract WAIC, DIC, and hyperpar means for all 6 models
+#results <- dplyr::bind_rows(lapply(1:1, function(i) {
 #  mod <- out_all[["models"]][[paste0("model_", i)]]
 #  hyper_means <- mod[["summary.hyperpar"]][["mean"]]
-#  
 #  base <- data.frame(model = paste0("model_", i),
 #    waic  = mod[["waic"]][["waic"]],
 #    dic   = mod[["dic"]][["dic"]])
-#  
 #  if (!is.null(hyper_means)) {
 #    hyper_df <- as.data.frame(t(setNames(hyper_means, paste0("hyperpar_mean_", seq_along(hyper_means)))))
 #    base <- cbind(base, hyper_df)
 #  }
-#  
 #  base
 #}))
-
 #write_xlsx(results, "inla_overall_results.xlsx")
 
 ## model predictions 
-#pred_grid_sf$model3_prob <-   out_all$predictions$pred3_prob
+#pred_grid_sf$model3_prob <-   out_all$predictions$pred1_prob
+#pred_grid_sf$pits_prob <-   out_all$predictions$pred1_prob
 
-# stratified model 5 (less and more pits on average at mines within rho)
+# stratified model 3 (less and more pits on average at mines within rho)
 formulas <- list(formula3 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex +  
     mis_2017 + dhs_2015 + ais_2011 + urban + wealth + f(spatial0, model = spde))
 
@@ -690,7 +820,7 @@ nw_mpits <- nw_rdt %>% filter(avg_pits_rho > 2.72)
 #pred_grid_sf$mpits_prob <- mpits_out$predictions$pred1_prob
 
 
-## part five:  number of pits -----
+## part five:   number of pits -----
 
 ## pits as predictor/EMM assessed using models with interaction terms and unadjusted beta 1s
 pits_formulas <- list(
@@ -714,77 +844,88 @@ pits_formulas <- list(
     mis_2017 + dhs_2015 + ais_2011 + urban + wealth + npitxprox + f(spatial0, model = spde),
   #Model 8 formula (DHS covariates + proximity + average pits at mines w/in rho + average pits x proximity)
   formula8 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + mis_2017 + dhs_2015 + 
-    ais_2011 + urban + wealth + avg_pits_rho + avg_pits_x_prox + f(spatial0, model = spde))
+    ais_2011 + urban + wealth + avg_pits_rho + avg_pits_x_prox + f(spatial0, model = spde),
+#Model 9 formula (DHS covariates + proximity, regular model 3!)
+formula9 <- y ~ 0 + Intercept + nearest_dist + elevation + age + sex + mis_2017 + dhs_2015 + 
+  ais_2011 + urban + wealth + avg_pits_rho + f(spatial0, model = spde))
 
-pits_out <- run_inla_overall(nw_rdt, mine_times, pits_formulas,mesh, spde, pred_grid_sf, A_pred, n_pred)
+#pits_out <- run_inla_overall(nw_rdt, mine_times, pits_formulas, mesh, spde, pred_grid_sf, A_pred, n_pred)
 
 ## model predictions 
-pred_grid_sf$pitsmodel_prob <- pits_out$predictions$pred1_prob
+#pred_grid_sf$pitsmodel_prob <- pits_out$predictions$pred1_prob
 
 # define which coefficient to pull from each model 
 beta1_map <- list(model_1 = "nearest_num_pits", model_2 = "nearest_num_pits",
   model_3 = "num_mines_rho", model_4 = "num_mines_rho",
   model_5 = "avg_pits_rho", model_6 = "avg_pits_rho", 
-  model_7 = "npitxprox", model_8 = "avg_pits_x_prox")
+  model_7 = "npitxprox", model_8 = "avg_pits_x_prox", model_9 = "nearest_dist")
 
 # extract coefficients, WAIC, and DIC in one loop 
-results <- do.call(rbind, lapply(seq_along(beta1_map), function(i) {
-  mod_name  <- names(beta1_map)[i]
-  param     <- beta1_map[[i]]
-  mod       <- pits_out$models[[mod_name]]
-  fix       <- mod$summary.fixed[param, ]
-  
-  data.frame(
-    model     = paste("Model", i),
-    parameter = param,
-    mean      = fix[["mean"]],
-    lower_95  = fix[["0.025quant"]],
-    upper_95  = fix[["0.975quant"]],
-    WAIC      = mod$waic$waic,
-    p_WAIC    = mod$waic$p.eff,
-    DIC       = mod$dic$dic,
-    p_DIC     = mod$dic$p.eff,
-    stringsAsFactors = FALSE)
-}))
-rownames(results) <- NULL
+#results <- do.call(rbind, lapply(seq_along(beta1_map), function(i) {
+#  mod_name  <- names(beta1_map)[i]
+#  param     <- beta1_map[[i]]
+#  mod       <- pits_out$models[[mod_name]]
+#  fix       <- mod$summary.fixed[param, ]
+#  data.frame(
+#    model     = paste("Model", i),
+#    parameter = param,
+#    mean      = fix[["mean"]],
+#    lower_95  = fix[["0.025quant"]],
+#    upper_95  = fix[["0.975quant"]],
+#    WAIC      = mod$waic$waic,
+#    p_WAIC    = mod$waic$p.eff,
+#    DIC       = mod$dic$dic,
+#    p_DIC     = mod$dic$p.eff,
+#    stringsAsFactors = FALSE)
+#}))
+#rownames(results) <- NULL
 
-# write to Excel 
-wb <- createWorkbook()
-addWorksheet(wb, "Model Comparison")
-writeDataTable(wb, "Model Comparison", results, tableStyle = "TableStyleMedium9")
-# styling
-headerStyle <- createStyle(textDecoration = "bold", halign = "center")
-addStyle(wb, "Model Comparison", headerStyle, rows = 1, cols = 1:ncol(results))
-saveWorkbook(wb, "pits_models.xlsx", overwrite = TRUE)
+## write to Excel 
+#wb <- createWorkbook()
+#addWorksheet(wb, "Model Comparison")
+#writeDataTable(wb, "Model Comparison", results, tableStyle = "TableStyleMedium9")
+## styling
+#headerStyle <- createStyle(textDecoration = "bold", halign = "center")
+#addStyle(wb, "Model Comparison", headerStyle, rows = 1, cols = 1:ncol(results))
+#saveWorkbook(wb, "pits_models.xlsx", overwrite = TRUE)
 
 ## pull coefficients for plotting
-pits_coeffs <- results[,c("model","mean","lower_95","upper_95")]
+#pits_coeffs <- results[,c("model","mean","lower_95","upper_95")]
 
 # Add a more descriptive label column
-pits_coeffs$label <- c("Model 1: RDT ~ Number of pits at nearest mine (unadjusted)",
-                       "Model 2: RDT ~ Number of pits at nearest mine (adjusted)",
-                       "Model 3: RDT ~ Number of mines within rho (unadjusted)",
-                       "Model 4: RDT ~ Number of mines within rho (adjusted)",
-                       "Model 5: RDT ~ Avg # of pits at mines within rho (unadjusted)",
-                       "Model 6: RDT ~ Avg # of pits at mines within rho (adjusted)",
-                       "Model 7: (adjusted) Number of pits × Proximity interaction coefficient", 
-                       "Model 8: (adjusted): Avg # of pits × Proximity interaction coefficient")
+#pits_coeffs$label <- c("Model 1: RDT ~ Number of pits at nearest mine (unadjusted)",
+#                       "Model 2: RDT ~ Number of pits at nearest mine (adjusted)",
+#                       "Model 3: RDT ~ Number of mines within rho (unadjusted)",
+#                       "Model 4: RDT ~ Number of mines within rho (adjusted)",
+#                       "Model 5: RDT ~ Avg # of pits at mines within rho (unadjusted)",
+#                       "Model 6: RDT ~ Avg # of pits at mines within rho (adjusted)",
+#                       "Model 7: Number of pits × Proximity interaction coefficient (adjusted)", 
+#                       "Model 8: Avg # of pits × Proximity interaction coefficient (adjusted)",
+#                       "Model 9: RDT ~ Proximity to nearest mine (adjusted)")
 
 # Reorder for plotting (bottom to top)
-pits_coeffs$label <- factor(pits_coeffs$label, levels = rev(pits_coeffs$label))
+#pits_coeffs$label <- factor(pits_coeffs$label, levels = rev(pits_coeffs$label))
+
+## add colors for different predictors!
+model_colors <- c("skyblue","deepskyblue4","pink","pink4", "orange","darkorange4",
+                  "orchid1","orchid4", "gold")
 
 # Create forest plot
-pits_forest <- ggplot(pits_coeffs, aes(x = mean, y = label)) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50", linewidth = 0.5) +
-  geom_errorbarh(aes(xmin = lower_95, xmax = upper_95), height = 0.2, linewidth = 0.9, color = "aquamarine3") +
-  geom_point(size = 3, color = "aquamarine3") + labs(subtitle = "Coefficients from INLA spatial models (95% Credible Intervals)",
-    x = "Coefficient estimate", y = NULL) + theme_classic(base_size = 18) + theme(panel.grid.major.y = element_blank(), 
-    panel.grid.minor = element_blank(),axis.text.y = element_text(size = 16))
+#pits_forest <- ggplot(pits_coeffs, aes(x = mean, y = label, color = label)) +
+#  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50", linewidth = 0.5) +
+#  geom_errorbarh(aes(xmin = lower_95, xmax = upper_95), height = 0.2, linewidth = 0.9) +
+#  geom_point(size = 3) +
+#  scale_color_manual(values = setNames(rev(model_colors), levels(pits_coeffs$label))) +
+#  labs(subtitle = "Coefficients from INLA spatial models (95% Credible Intervals)",
+#    x = "Coefficient estimate", y = NULL) +
+#  theme_classic(base_size = 18) + theme(panel.grid.major.y = element_blank(),
+#    panel.grid.minor = element_blank(), axis.text.y = element_text(size = 16),
+#    legend.position = "none")
 #pits_forest
 #ggsave("C:/Users/cgait/OneDrive/Desktop/pits_forest.jpeg",width=40,height=20,units=c("cm"),pits_forest)
 
 
-## part six:   sensitivity analysis for GLM ----
+## part six:    sensitivity analysis for GLM ----
 
 ## for imputation of number of pits and resulting glm
 #seeds <- c(111, 222, 333, 444, 555, 666, 777, 888, 999,
@@ -815,7 +956,7 @@ pits_forest <- ggplot(pits_coeffs, aes(x = mean, y = label)) +
 
 
 
-## part seven: sensitivity analysis for range parameter ----
+## part seven:  sensitivity analysis for range ----
 
 ## range parameter prior values
 range_values <- c(1, 5, 10, 15)
@@ -897,20 +1038,46 @@ range_heat_var <- ggplot(variance_sensitivity, aes(x = factor(var_val), y = fact
 #range_heat_var
 
 
-## part eight: maps (predictions and observed) ----
-#pull DHS clusters for map
-nw_cluster <- nw_rdt[,c("lat", "long", "svy", "rdt")]
-cluster_prev <- nw_cluster %>% group_by(lat, long, svy) %>% summarise(n = n(), 
-                positives = sum(rdt, na.rm = TRUE), prevalence = mean(rdt, na.rm = TRUE)) %>% ungroup()
+## part eight:  maps (predictions and observed) ----
 
-## subset mines to active mines during each survey wave
-mine_times_11 <- mine_times_sf %>% filter(year_open<2011)
-mine_times_15 <- mine_times_sf %>% filter(year_open<=2016)
-mine_times_15 <- mine_times_15 %>% filter(year_close>=2016)
-mine_times_17 <- mine_times_sf %>% filter(year_open<=2017)
-mine_times_17 <- mine_times_17 %>% filter(year_close>=2017)
-mine_times_22 <- mine_times_sf %>% filter(year_open<=2022)
-mine_times_22 <- mine_times_22 %>% filter(year_close>=2022)
+# Pull DHS clusters for map (include HV001 and svy_year for proximity lookup)
+nw_cluster <- nw_rdt[, c("HV001", "lat", "long", "svy", "svy_year", "rdt")]
+cluster_prev <- nw_cluster %>% group_by(lat, long, svy) %>%
+  summarise(n = n(), positives = sum(rdt, na.rm = TRUE),
+            prevalence = mean(rdt, na.rm = TRUE)) %>% ungroup()
+
+## Re-calculate proximity using only chemical mines (chem_times, created in part 4)
+#chem_prox <- reduce(survey_years, function(data, year) {
+#  year_coords <- survey_coords[[as.character(year)]]
+#  year_proximity <- calculate_proximity(year, chem_times, year_coords)
+#  if (nrow(data) == 0) year_proximity
+#  else left_join(data, year_proximity, by = "HV001")
+#}, .init = tibble())
+
+# Build long-format lookup: one row per HV001 x survey year with nearest_dist
+#chem_nearest <- bind_rows(lapply(survey_years, function(yr) {
+#  chem_prox %>%
+#    dplyr::select(HV001, nearest_dist = !!paste0("nearest_dist", yr)) %>%
+#    mutate(svy_year = yr)
+#}))
+
+# Subset to clusters within 60 km of a chemical mine active during their survey year
+#nw_cluster <- nw_cluster %>%
+#  left_join(chem_nearest, by = c("HV001", "svy_year")) %>%
+#  filter(nearest_dist <= 60) %>%
+#  dplyr::select(-nearest_dist, -svy_year)
+
+# Recompute cluster_prev on the filtered clusters
+cluster_prev <- nw_cluster %>% group_by(lat, long, svy) %>%
+  summarise(n = n(), positives = sum(rdt, na.rm = TRUE),
+            prevalence = mean(rdt, na.rm = TRUE)) %>% ungroup()
+
+## Subset chemical mines to those active during each survey wave
+mine_times_11 <- mine_times_sf %>% filter(year_open < 2011)
+mine_times_15 <- mine_times_sf %>% filter(year_open <= 2016, year_close >= 2016)
+mine_times_17 <- mine_times_sf %>% filter(year_open <= 2017, year_close >= 2017)
+mine_times_22 <- mine_times_sf %>% filter(year_open <= 2022, year_close >= 2022)
+
 
 ## clip effects grid to TZ district boundaries, after fixing invalid geometries
 district_valid <- st_make_valid(district)
@@ -924,7 +1091,8 @@ pred_grid_sf <- pred_grid_sf[st_within(st_centroid(pred_grid_sf), tanzania_bound
 ## then clip effects (within TZ boundary) to a convex polygon using cluster locations
 #pull both cluster and mine coordinates into one list
 cluster_coord <- nw_cluster[,c("lat","long")]
-mines_coord <- mine_times[,c("lat","long")]
+#mines_coord <- mine_times[,c("lat","long")]
+mines_coord <- chem_times[,c("lat","long")]
 all_coords <- bind_rows(cluster_coord, mines_coord)
 cluster_sf <- st_as_sf(all_coords, coords = c("long", "lat"), crs = 4326)
 # convex hull polygon
@@ -934,9 +1102,9 @@ convex_poly <- st_transform(convex_poly, 4210)
 convex_poly_buff <- st_buffer(convex_poly, dist = 0.075)  # buffer in degrees; adjust as needed
 pred_overall_clipped <- st_intersection(pred_grid_sf, convex_poly_buff)
 
-remove(africa, all_complete, cluster_coords, cluster_coord, clusters, clusters_sf, cluster_sf, complete1, convex_poly, 
+remove(africa, all_complete, cluster_coord, clusters, clusters_sf, cluster_sf, complete1, convex_poly, 
        convex_poly_buff, coords, district, pred_grid, mines_coord, mine_times_imp1, mines_imp, mines_missing, 
-       pred_nearest_dist, rwa, bur, uga, tza)
+       pred_nearest_dist)
 
 ## malaria prevalence (RDT) in each survey wave
 # Create a list of survey specifications
@@ -986,70 +1154,72 @@ survey_specs <- list(list(svy = "dhs_2022", mine_data = mine_times_22, title = "
 #ggsave("C:/Users/cgait/OneDrive/Desktop/model3_pred.jpeg",width=25,height=15,units=c("cm"),pred_3)
 
 
-## predicted prevalence for pits model 4, full study population
-pred_pits <- ggplot() + geom_sf(data = bounds, fill = "grey90") + geom_sf_text(data = bounds,
-                        aes(label = NAME_0),color = "grey35",size = 3, fontface = "italic") +
-  geom_sf(data = pred_overall_clipped, aes(color = pitsmodel_prob)) +
-  geom_sf(data = Victoria, fill = "skyblue", color = "skyblue") +
-  scale_color_viridis_c(option = "inferno", name = "Predicted prevalence", direction = -1, alpha = 0.7) + 
-  ggnewscale::new_scale("color") +
-  geom_sf(data = mine_times_sf, aes(shape = size, color = size), size = 2, alpha = 0.7) +
-  scale_shape_manual(values = c("artisanal" = 17, "industrial" = 15), name = "Mine type") +
-  scale_color_manual(values = c("artisanal" = "plum1", "industrial" = "darkorchid4"), name = "Mine type") +
-  geom_point(data = nw_cluster, aes(x = long, y = lat), color = "grey75",shape = 21, size = 2.5) +
-  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) +
-  annotation_scale(location = "br", width_hint = 0.3, text_cex = 0.7) +
-  theme(legend.title = element_text(size = 12), legend.text  = element_text(size = 12),
-        axis.text   = element_blank(), axis.ticks  = element_blank(),
-        panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
-  labs(x = "", y = "") + ggtitle("RDT positivity predicted by Pits Model 4")
+## predicted prevalence for avg pits rho model, full study population
+#pred_pits <- ggplot() + geom_sf(data = bounds, fill = "grey90") + geom_sf_text(data = bounds,
+#                        aes(label = NAME_0),color = "grey35",size = 3, fontface = "italic") +
+#  geom_sf(data = pred_overall_clipped, aes(color = pits_prob)) +
+#  geom_sf(data = Victoria, fill = "skyblue", color = "skyblue") +
+#  scale_color_viridis_c(option = "inferno", name = "Predicted prevalence", direction = -1, alpha = 0.7) + 
+#  ggnewscale::new_scale("color") +
+#  geom_sf(data = mine_times_sf, aes(shape = size, color = size), size = 2, alpha = 0.7) +
+#  scale_shape_manual(values = c("artisanal" = 17, "industrial" = 15), name = "Mine type") +
+#  scale_color_manual(values = c("artisanal" = "plum1", "industrial" = "darkorchid4"), name = "Mine type") +
+#  geom_point(data = nw_cluster, aes(x = long, y = lat), color = "grey75",shape = 21, size = 2.5) +
+#  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) +
+#  annotation_scale(location = "br", width_hint = 0.3, text_cex = 0.7) +
+#  theme(legend.title = element_text(size = 12), legend.text  = element_text(size = 12),
+#        axis.text   = element_blank(), axis.ticks  = element_blank(),
+#        panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+#  labs(x = "", y = "") + ggtitle("RDT positivity predicted by proximity to industrial mining")
 #pred_pits
-ggsave("C:/Users/cgait/OneDrive/Desktop/pitsmodel_pred.jpeg",width=25,height=15,units=c("cm"),pred_pits)
+#ggsave("C:/Users/cgait/OneDrive/Desktop/pitsmodel_pred.jpeg",width=25,height=15,units=c("cm"),pred_pits)
 
 
 ## overall/combined plot across all survey waves, stratified by exposure to puts
 
 # shared color limits across both strata
-#shared_limits <- range(c(pred_overall_clipped$mpits_prob, pred_overall_clipped$lpits_prob), na.rm = TRUE)
+shared_limits <- range(c(pred_overall_clipped$mpits_prob, pred_overall_clipped$lpits_prob), na.rm = TRUE)
 
 # exposed to more pits
 pred_mpits <- ggplot() + geom_sf(data = bounds, fill = "grey90") + geom_sf_text(data = bounds,
            aes(label = NAME_0),color = "grey35",size = 3, fontface = "italic") +
   geom_sf(data = pred_overall_clipped, aes(color = mpits_prob)) +
   geom_sf(data = Victoria, fill = "skyblue", color = "skyblue") +
-  scale_color_viridis_c(option = "inferno", name = "Predicted prevalence", direction = -1, alpha = 0.7) + 
+  scale_color_scico(palette = "managua", name = "Predicted prevalence", direction = -1, alpha = 0.7,
+                        limits = shared_limits) + 
   ggnewscale::new_scale("color") +
   geom_sf(data = mine_times_sf, aes(shape = size, color = size), size = 2, alpha = 0.7) +
   scale_shape_manual(values = c("artisanal" = 17, "industrial" = 15), name = "Mine type") +
   scale_color_manual(values = c("artisanal" = "plum1", "industrial" = "darkorchid4"), name = "Mine type") +
   geom_point(data = nw_cluster, aes(x = long, y = lat), color = "grey95",shape = 21, size = 1.5) +
-  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) +
+  coord_sf(xlim = c(30.7, 34.8), ylim = c(-4.8, -1)) +
   annotation_scale(location = "br", width_hint = 0.3, text_cex = 0.7) +
   theme(legend.title = element_text(size = 12), legend.text  = element_text(size = 12),
         axis.text   = element_blank(), axis.ticks  = element_blank(),
         panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
   labs(x = "", y = "") + ggtitle("Clusters exposed to more pits (>2.7) on average 
-  at mines within 25.5 km")
+  at mines using chemicals within 25.5 km")
 
 #exposed to fewer pits
 pred_lpits <- ggplot() + geom_sf(data = bounds, fill = "grey90") + geom_sf_text(data = bounds,
          aes(label = NAME_0),color = "grey35",size = 3, fontface = "italic") +
   geom_sf(data = pred_overall_clipped, aes(color = lpits_prob)) +
   geom_sf(data = Victoria, fill = "skyblue", color = "skyblue") +
-  scale_color_viridis_c(option = "inferno", name = "Predicted prevalence", direction = -1, alpha = 0.7) + 
+  scale_color_scico(palette = "managua", name = "Predicted prevalence", direction = -1, alpha = 0.7,
+                        limits = shared_limits) + 
   ggnewscale::new_scale("color") +
   geom_sf(data = mine_times_sf, aes(shape = size, color = size), size = 2, alpha = 0.7) +
   scale_shape_manual(values = c("artisanal" = 17, "industrial" = 15), name = "Mine type") +
   scale_color_manual(values = c("artisanal" = "plum1", "industrial" = "darkorchid4"), name = "Mine type") +
   geom_point(data = nw_cluster, aes(x = long, y = lat), color = "grey95",shape = 21, size = 1.5) +
-  coord_sf(xlim = c(29.4, 34.5), ylim = c(-5.2, -1)) +
+  coord_sf(xlim = c(30.7, 34.8), ylim = c(-4.8, -1)) +
   annotation_scale(location = "br", width_hint = 0.3, text_cex = 0.7) +
   theme(legend.title = element_text(size = 12), legend.text  = element_text(size = 12),
         axis.text   = element_blank(), axis.ticks  = element_blank(),
         panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
   labs(x = "", y = "") + ggtitle("Clusters exposed to fewer pits (<2.7) on average 
-  at mines within 25.5 km")
+  at mines using chemicals within 25.5 km")
 
 #model3_pits <- ggarrange(pred_mpits, pred_lpits, nrow = 1, ncol = 2)
-#ggsave("C:/Users/cgait/OneDrive/Desktop/model3_pits.jpeg",width=40,height=25,units=c("cm"),model3_pits)
+#ggsave("C:/Users/cgait/OneDrive/Desktop/model3_chemical_pits.jpeg",width=40,height=15,units=c("cm"),model3_pits)
 
